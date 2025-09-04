@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-type Row = Record<string, unknown>;
-type Section = "nominas" | "reportes" | "empleados";
+type Row = Record<string, any>;
+type Section = "nominas" | "empleados" | "checkin";
 
+/* ───── Utilidades ─────────────────────────────────────────────── */
 function toCSV(rows: Row[]): string {
   if (!rows?.length) return "";
   const cols = Object.keys(rows[0]);
@@ -23,6 +24,35 @@ function isNumericColumn(data: Row[], col: string): boolean {
     .filter((v) => v !== null && v !== undefined && v !== "");
   if (!vals.length) return false;
   return vals.every((v) => !isNaN(Number(v)));
+}
+
+const fmt = (n: number) =>
+  new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n);
+
+/** Parse HH:MM o legacy 8,50 */
+function parseTimeToHours(input: string): number | null {
+  if (!input) return null;
+  const s = String(input).trim();
+  const m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (m) {
+    const hh = Number(m[1]);
+    const mm = Number(m[2]);
+    if (hh >= 0 && hh < 24 && mm >= 0 && mm < 60) return hh + mm / 60;
+    return null;
+  }
+  if (/^\d{1,2},\d{1,2}$/.test(s)) return Number(s.replace(",", "."));
+  if (/^\d{1,2}(\.\d+)?$/.test(s)) return Number(s);
+  return null;
+}
+function spanHours(start: string, end: string): number {
+  const a = parseTimeToHours(start);
+  const b = parseTimeToHours(end);
+  if (a === null || b === null) return 0;
+  const d = b - a;
+  return d > 0 ? d : 0;
 }
 
 /** Tema oscuro con persistencia */
@@ -46,20 +76,31 @@ function useTheme() {
   return { dark, setDark };
 }
 
+/* ───── App ────────────────────────────────────────────────────── */
 export default function App() {
   const { dark, setDark } = useTheme();
   const [section, setSection] = useState<Section>("nominas");
 
-  // ----- Datos -----
+  // Título de semana (solo debajo de la tabla de nóminas)
+  const [sectionTitle, setSectionTitle] = useState<string>("");
+
+  // Datos nómina
   const [rawData, setRawData] = useState<Row[]>([]);
   useEffect(() => {
     fetch("/nominas_merged_clean.json")
       .then((r) => r.json())
-      .then((data: Row[]) => setRawData(data))
+      .then((data: Row[]) => {
+        const withSemana = data.find(
+          (r) => typeof r.semana === "string" && r.semana.trim() !== ""
+        );
+        if (withSemana?.semana) setSectionTitle(String(withSemana.semana));
+        const cleaned = data.map(({ semana, ...rest }) => rest);
+        setRawData(cleaned);
+      })
       .catch((err) => console.error("No se pudo cargar el JSON:", err));
   }, []);
 
-  // Columnas y tipos
+  // Columnas
   const columns = useMemo(
     () => (rawData.length ? Object.keys(rawData[0]) : []),
     [rawData]
@@ -73,7 +114,7 @@ export default function App() {
     [columns, numericCols]
   );
 
-  // Hints columnas principales
+  // Selecciones
   const [nameCol, setNameCol] = useState<string>("");
   const [amountCol, setAmountCol] = useState<string>("");
   useEffect(() => {
@@ -104,14 +145,12 @@ export default function App() {
     );
   }, [rawData, q]);
 
-  // Periodo (mes/fecha/año autodetectado)
+  // Periodo
   const [periodo, setPeriodo] = useState<string>("");
-  const periodoCol = useMemo(() => {
-    return (
-      columns.find((c) => /(periodo|mes|fecha|anio|año)/i.test(c)) || ""
-    );
-  }, [columns]);
-
+  const periodoCol = useMemo(
+    () => columns.find((c) => /(periodo|mes|fecha|anio|año)/i.test(c)) || "",
+    [columns]
+  );
   const periodosUnicos = useMemo(() => {
     if (!periodoCol) return [];
     return Array.from(new Set(filtered.map((r) => String(r[periodoCol] ?? ""))))
@@ -166,183 +205,809 @@ export default function App() {
       .sort((a, b) => b.total - a.total)
       .slice(0, 15);
   }, [datosPeriodo, nameCol, amountCol]);
+  const maxTop = useMemo(
+    () => (topTotales.length ? Math.max(...topTotales.map((t) => t.total)) : 0),
+    [topTotales]
+  );
 
+  // Columnas visibles
   const visibleCols = useMemo(() => columns.slice(0, 30), [columns]);
 
-  return (
-    <div className="min-h-screen flex bg-gray-100 dark:bg-neutral-900 dark:text-neutral-100">
-      {/* SIDEBAR OSCURO */}
-      <aside className="hidden md:flex w-64 flex-col bg-emerald-800 text-white p-5 gap-4">
-        <div className="text-2xl font-bold tracking-tight">PetroArte</div>
-        <nav className="mt-2 space-y-1 text-sm">
-          <button
-            onClick={() => setSection("nominas")}
-            className={`w-full text-left px-3 py-2 rounded-lg transition ${
-              section === "nominas" ? "bg-emerald-600" : "hover:bg-emerald-700"
-            }`}
-          >
-            Nóminas
-          </button>
-          <button
-            onClick={() => setSection("reportes")}
-            className={`w-full text-left px-3 py-2 rounded-lg transition ${
-              section === "reportes" ? "bg-emerald-600" : "hover:bg-emerald-700"
-            }`}
-          >
-            Reportes
-          </button>
-          <button
-            onClick={() => setSection("empleados")}
-            className={`w-full text-left px-3 py-2 rounded-lg transition ${
-              section === "empleados" ? "bg-emerald-600" : "hover:bg-emerald-700"
-            }`}
-          >
-            Empleados
-          </button>
-        </nav>
-        <div className="mt-auto text-xs text-emerald-50/80">
-          © {new Date().getFullYear()} PetroArte
-        </div>
-      </aside>
+  /* ───── Nueva semana (editor) ────────────────────────────────── */
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [semanaInput, setSemanaInput] = useState<string>("");
 
-      {/* CONTENEDOR PRINCIPAL */}
-      <div className="flex-1 flex flex-col">
-        {/* HEADER SUPERIOR */}
-        <header className="bg-white dark:bg-neutral-950 border-b dark:border-neutral-800">
-          <div className="px-4 md:px-6 py-3 flex items-center gap-3">
-            <div className="md:hidden">
-              <span className="font-bold">PetroArte</span>
-            </div>
-            <div className="text-sm text-gray-500 dark:text-neutral-400">
-              Panel de Gestión
-            </div>
-            <div className="ml-auto">
-              <button
-                onClick={() => setDark(!dark)}
-                className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition text-sm"
-                title="Cambiar tema claro/oscuro"
-              >
-                {dark ? "🌙 Oscuro" : "☀️ Claro"}
-              </button>
+  // Auto-cálculos
+  const [autoExtra, setAutoExtra] = useState<boolean>(true);
+  const [extraMultiplier, setExtraMultiplier] = useState<number>(1.5);
+  const [autoHorasExtra, setAutoHorasExtra] = useState<boolean>(false);
+  const [extrasThreshold, setExtrasThreshold] = useState<number>(48);
+
+  type Draft = {
+    nombre: string;
+    total_horas_primarias: number; // horas normales capturadas
+    horas_extras: number;
+    costo_hora_primaria: number;
+    costo_hora_extra: number;
+    bono_semanal: number;
+    descuentos: number;
+    pendiente_descuento: number;
+    pago_semanal_base: number;
+    extra?: string;
+  };
+
+  const [draftRows, setDraftRows] = useState<Draft[]>([
+    {
+      nombre: "",
+      total_horas_primarias: 0,
+      horas_extras: 0,
+      costo_hora_primaria: 0,
+      costo_hora_extra: 0,
+      bono_semanal: 0,
+      descuentos: 0,
+      pendiente_descuento: 0,
+      pago_semanal_base: 0,
+      extra: "",
+    },
+  ]);
+
+  const addDraftRow = () =>
+    setDraftRows((rows) => [
+      ...rows,
+      {
+        nombre: "",
+        total_horas_primarias: 0,
+        horas_extras: 0,
+        costo_hora_primaria: 0,
+        costo_hora_extra: 0,
+        bono_semanal: 0,
+        descuentos: 0,
+        pendiente_descuento: 0,
+        pago_semanal_base: 0,
+        extra: "",
+      },
+    ]);
+  const removeDraftRow = (idx: number) =>
+    setDraftRows((rows) => rows.filter((_, i) => i !== idx));
+
+  // Helpers para setear con autocalculo
+  function setRow<K extends keyof Draft>(idx: number, key: K, value: Draft[K]) {
+    setDraftRows((rows) =>
+      rows.map((r, i) => {
+        if (i !== idx) return r;
+        let next: Draft = { ...r, [key]: value } as Draft;
+
+        // Auto: horas extra sobre umbral
+        if (autoHorasExtra && key === "total_horas_primarias") {
+          const totalIngresado = Number(value) || 0;
+          const extras = Math.max(0, totalIngresado - extrasThreshold);
+          const prim = Math.min(totalIngresado, extrasThreshold);
+          next.total_horas_primarias = prim;
+          next.horas_extras = extras;
+        }
+
+        // Auto: costo hora extra = primaria * multiplicador
+        if (autoExtra && (key === "costo_hora_primaria" || key === "horas_extras")) {
+          const base = Number(
+            key === "costo_hora_primaria" ? value : next.costo_hora_primaria
+          );
+          if (!isNaN(base)) {
+            const calc = Math.round(base * extraMultiplier * 100) / 100;
+            next.costo_hora_extra = calc;
+          }
+        }
+        return next;
+      })
+    );
+  }
+
+  const updateDraft = <K extends keyof Draft>(
+    idx: number,
+    key: K,
+    value: Draft[K]
+  ) => setRow(idx, key, value);
+
+  function draftToRows(): Row[] {
+    return draftRows
+      .filter((r) => r.nombre.trim() !== "")
+      .map((r) => {
+        const pago_horas_primarias =
+          Number(r.total_horas_primarias) * Number(r.costo_hora_primaria);
+        const pago_horas_extras =
+          Number(r.horas_extras) * Number(r.costo_hora_extra);
+        const pago_semanal_calc = pago_horas_primarias + pago_horas_extras;
+        const total = pago_semanal_calc - Number(r.descuentos || 0);
+        const total_2 = total + Number(r.bono_semanal || 0);
+        const total_final = total_2;
+
+        return {
+          nombre: r.nombre,
+          total_horas: Number(r.total_horas_primarias) + Number(r.horas_extras),
+          horas_primarias: 53,
+          horas_extras: Number(r.horas_extras),
+          pago_semanal_base: Number(r.pago_semanal_base || 0),
+          costo_hora_primaria: Number(r.costo_hora_primaria),
+          total_horas_primarias: Number(r.total_horas_primarias),
+          pago_horas_primarias: pago_horas_primarias,
+          costo_hora_extra: Number(r.costo_hora_extra),
+          pago_horas_extras: pago_horas_extras,
+          pago_semanal_calc: pago_semanal_calc,
+          descuentos: Number(r.descuentos || 0),
+          pendiente_descuento: Number(r.pendiente_descuento || 0),
+          total: total,
+          bono_semanal: Number(r.bono_semanal || 0),
+          total_2: total_2,
+          bono_mensual: null,
+          comision: null,
+          total_con_bono_mensual: total_2,
+          extra: r.extra ?? null,
+          total_final: total_final,
+        } as Row;
+      });
+  }
+
+  function addWeekToView() {
+    const newRows = draftToRows();
+    if (!newRows.length) {
+      alert("Agrega por lo menos un empleado con nombre.");
+      return;
+    }
+    if (!semanaInput.trim()) {
+      alert("Escribe el título de la semana.");
+      return;
+    }
+    setRawData((prev) => [...newRows, ...prev]);
+    setSectionTitle(semanaInput.trim());
+    setEditorOpen(false);
+    setSemanaInput("");
+    setDraftRows([
+      {
+        nombre: "",
+        total_horas_primarias: 0,
+        horas_extras: 0,
+        costo_hora_primaria: 0,
+        costo_hora_extra: 0,
+        bono_semanal: 0,
+        descuentos: 0,
+        pendiente_descuento: 0,
+        pago_semanal_base: 0,
+        extra: "",
+      },
+    ]);
+    setPage(0);
+  }
+
+  function downloadWeekJSON() {
+    const rows = draftToRows().map((r) => ({ semana: semanaInput || "", ...r }));
+    if (!rows.length) {
+      alert("No hay filas válidas para descargar.");
+      return;
+    }
+    const blob = new Blob([JSON.stringify(rows, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `nomina_${(semanaInput || "semana").replace(/\s+/g, "_")}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  /* ───── Check-in ─────────────────────────────────────────────── */
+  type DayPair = { in: string; out: string };
+  type CheckRow = {
+    nombre: string;
+    LUN: DayPair; MAR: DayPair; MIE: DayPair; JUE: DayPair; VIE: DayPair; SAB: DayPair;
+  };
+
+  const [checkRows, setCheckRows] = useState<CheckRow[]>([
+    {
+      nombre: "",
+      LUN: { in: "08:30", out: "18:00" },
+      MAR: { in: "08:30", out: "18:00" },
+      MIE: { in: "", out: "" },
+      JUE: { in: "", out: "" },
+      VIE: { in: "08:30", out: "14:00" },
+      SAB: { in: "", out: "" },
+    },
+  ]);
+
+  const addCheckRow = () =>
+    setCheckRows((rows) => [
+      ...rows,
+      {
+        nombre: "",
+        LUN: { in: "", out: "" },
+        MAR: { in: "", out: "" },
+        MIE: { in: "", out: "" },
+        JUE: { in: "", out: "" },
+        VIE: { in: "", out: "" },
+        SAB: { in: "", out: "" },
+      },
+    ]);
+  const removeCheckRow = (idx: number) =>
+    setCheckRows((rows) => rows.filter((_, i) => i !== idx));
+
+  function updateCheck(idx: number, day: keyof CheckRow, field: "in" | "out", value: string) {
+    setCheckRows((rows) =>
+      rows.map((r, i) =>
+        i === idx
+          ? {
+              ...r,
+              [day]:
+                day === "nombre"
+                  ? r[day]
+                  : {
+                      ...(r[day] as DayPair),
+                      [field]: value,
+                    },
+            }
+          : r
+      )
+    );
+  }
+  function updateCheckName(idx: number, value: string) {
+    setCheckRows((rows) => rows.map((r, i) => (i === idx ? { ...r, nombre: value } : r)));
+  }
+  function calcHoursForRow(r: CheckRow) {
+    return (
+      spanHours(r.LUN.in, r.LUN.out) +
+      spanHours(r.MAR.in, r.MAR.out) +
+      spanHours(r.MIE.in, r.MIE.out) +
+      spanHours(r.JUE.in, r.JUE.out) +
+      spanHours(r.VIE.in, r.VIE.out) +
+      spanHours(r.SAB.in, r.SAB.out)
+    );
+  }
+  function pushCheckinToDraft() {
+    const mapped = checkRows
+      .filter((r) => r.nombre.trim() !== "")
+      .map((r) => ({
+        nombre: r.nombre,
+        total_horas_primarias: Number(calcHoursForRow(r).toFixed(2)),
+        horas_extras: 0,
+        costo_hora_primaria: 0,
+        costo_hora_extra: 0,
+        bono_semanal: 0,
+        descuentos: 0,
+        pendiente_descuento: 0,
+        pago_semanal_base: 0,
+        extra: "",
+      })) as Draft[];
+    if (!mapped.length) {
+      alert("Captura al menos un empleado con horario.");
+      return;
+    }
+    setDraftRows(mapped);
+    setSection("nominas");
+    setEditorOpen(true);
+  }
+  function loadUserTemplate() {
+    const toRow = (arr: Array<string | undefined>): CheckRow => ({
+      nombre: "",
+      LUN: { in: arr[0] || "", out: arr[1] || "" },
+      MAR: { in: arr[2] || "", out: arr[3] || "" },
+      MIE: { in: arr[4] || "", out: arr[5] || "" },
+      JUE: { in: arr[6] || "", out: arr[7] || "" },
+      VIE: { in: arr[8] || "", out: arr[9] || "" },
+      SAB: { in: arr[10] || "", out: arr[11] || "" },
+    });
+    const rows: CheckRow[] = [
+      toRow(["08:30","18:00","08:30","19:00","08:30","","08:30","14:00","","",""]),
+      toRow(["08:30","18:00","08:30","18:00","08:30","","08:30","14:00","","",""]),
+      toRow(["08:30","18:00","08:30","18:00","08:30","18:00","08:30","14:00","","",""]),
+      toRow(["08:30","18:00","08:30","18:00","08:30","18:00","08:30","14:00","","",""]),
+      toRow(["08:30","18:00","08:30","18:00","08:30","18:00","08:30","14:00","","",""]),
+      toRow(["08:30","18:00","08:30","18:00","08:30","18:00","08:30","14:00","","",""]),
+      toRow(["08:30","18:00","08:30","18:00","08:30","","08:30","14:00","","",""]),
+      toRow(["08:30","18:00","08:30","18:00","08:30","","08:30","14:00","","",""]),
+      toRow(["08:30","18:00","08:30","18:00","08:30","","08:30","14:00","","",""]),
+      toRow(["08:30","18:00","08:30","18:00","08:30","","08:30","14:00","","",""]),
+      toRow(["08:30","18:00","08:30","18:00","08:30","","08:30","14:00","","",""]),
+      toRow(["08:30","18:00","08:30","18:00","08:30","18:00","08:30","14:00","","",""]),
+      toRow(["08:30","18:00","08:45","18:00","08:45","","08:30","14:00","","",""]),
+      toRow(["08:30","18:00","08:30","18:00","08:30","","08:30","14:00","","",""]),
+    ];
+    setCheckRows(rows);
+  }
+
+  /* ────────────────────────────────────────────────────────────── UI  */
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-sky-50 via-indigo-50 to-fuchsia-50 dark:from-[#0b1020] dark:via-[#0a0f1a] dark:to-[#0a0f1a] text-slate-800 dark:text-slate-100 transition-colors">
+      {/* HEADER */}
+      <header className="sticky top-0 z-20 backdrop-blur supports-[backdrop-filter]:bg-white/50 dark:supports-[backdrop-filter]:bg-[#0b1020]/60 border-b border-white/50 dark:border-white/10">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
+          <div className="text-transparent bg-clip-text bg-gradient-to-r from-sky-600 via-violet-600 to-fuchsia-600 dark:from-sky-400 dark:via-violet-400 dark:to-fuchsia-400 text-xl font-extrabold tracking-tight select-none">
+            PetroArte
+          </div>
+          <span className="opacity-60 text-sm">· Panel de Gestión</span>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => setDark(!dark)}
+              className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-sky-600 to-fuchsia-600 text-white text-sm shadow hover:shadow-md active:scale-[0.98] transition"
+              title="Cambiar tema claro/oscuro"
+            >
+              {dark ? "🌙 Oscuro" : "☀️ Claro"}
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* LAYOUT */}
+      <div className="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 md:grid-cols-[230px_1fr] gap-6">
+        {/* SIDEBAR */}
+        <aside className="hidden md:block">
+          <div className="rounded-2xl p-3 bg-gradient-to-b from-sky-500/90 via-violet-500/90 to-fuchsia-500/90 text-white shadow-xl ring-1 ring-white/30">
+            <div className="px-2 py-2 text-sm/relaxed opacity-90">Navegación</div>
+            <nav className="space-y-2 mt-1">
+              {(["nominas", "checkin", "empleados"] as Section[]).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setSection(s)}
+                  className={`w-full text-left px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 transition ${
+                    section === s ? "ring-2 ring-white/60" : ""
+                  }`}
+                >
+                  {s === "nominas" ? "Nóminas" : s === "checkin" ? "Check-in" : s[0].toUpperCase() + s.slice(1)}
+                </button>
+              ))}
+            </nav>
+            <div className="mt-4 text-xs/relaxed px-2 py-2 bg-white/10 rounded-xl">
+              <div className="opacity-80">Consejo</div>
+              <div className="opacity-75">
+                Captura entradas/salidas en “Check-in” y envía a “Nueva semana”.
+              </div>
             </div>
           </div>
-        </header>
+        </aside>
 
-        {/* CONTENIDO */}
-        <main className="p-4 md:p-6 space-y-6">
+        {/* MAIN */}
+        <main className="space-y-6">
+          {/* ─────────────── CHECK-IN ─────────────── */}
+          {section === "checkin" && (
+            <div className="space-y-4">
+              <div className="rounded-2xl p-4 shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-white/70 dark:bg-white/5 backdrop-blur">
+                <div className="flex flex-wrap gap-2 items-center">
+                  <button
+                    className="px-3 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-fuchsia-500 text-white text-sm shadow"
+                    onClick={addCheckRow}
+                  >
+                    + Agregar fila
+                  </button>
+                  <button
+                    className="px-3 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-black/10 dark:border-white/10 text-sm"
+                    onClick={loadUserTemplate}
+                  >
+                    Cargar plantilla (lo que me mandaste)
+                  </button>
+                  <button
+                    className="ml-auto px-3 py-2 rounded-xl bg-gradient-to-r from-fuchsia-500 to-sky-500 text-white text-sm shadow"
+                    onClick={pushCheckinToDraft}
+                  >
+                    Enviar a “Nueva semana”
+                  </button>
+                </div>
+              </div>
+
+              {/* SCROLL CONTROLADO (no se sale del viewport) */}
+              <div className="rounded-2xl shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
+                <div className="overflow-x-auto">
+                  <table className="w-full table-fixed border-collapse text-[13px]">
+                    <colgroup>
+                      <col className="w-[180px]" />
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                      <col className="w-[90px]" />
+                      <col className="w-[60px]" />
+                    </colgroup>
+                    <thead>
+                      <tr className="bg-gradient-to-r from-sky-600 to-fuchsia-600 text-white">
+                        <th className="px-3 py-2 text-left">Nombre</th>
+                        {["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"].map((d) => (
+                          <th key={d} className="px-2 py-2 text-center">{d}</th>
+                        ))}
+                        <th className="px-2 py-2 text-right">Horas (sem)</th>
+                        <th className="px-2 py-2"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {checkRows.map((r, idx) => {
+                        const total = calcHoursForRow(r);
+                        return (
+                          <tr key={idx} className={idx % 2 ? "bg-white/60 dark:bg-white/5" : "bg-white/30 dark:bg-transparent"}>
+                            <td className="px-3 py-2">
+                              <input
+                                className="w-full min-w-0 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                value={r.nombre}
+                                onChange={(e) => updateCheckName(idx, e.target.value)}
+                                placeholder={`Empleado ${idx + 1}`}
+                              />
+                            </td>
+                            {(["LUN","MAR","MIE","JUE","VIE","SAB"] as (keyof CheckRow)[]).map((day) => (
+                              <td key={String(day)} className="px-2 py-2">
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="time"
+                                    className="w-full min-w-0 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                    value={(r[day] as DayPair).in}
+                                    onChange={(e) => updateCheck(idx, day, "in", e.target.value)}
+                                  />
+                                  <span className="opacity-50">→</span>
+                                  <input
+                                    type="time"
+                                    className="w-full min-w-0 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                    value={(r[day] as DayPair).out}
+                                    onChange={(e) => updateCheck(idx, day, "out", e.target.value)}
+                                  />
+                                </div>
+                              </td>
+                            ))}
+                            <td className="px-2 py-2 text-right font-mono">{fmt(total)}</td>
+                            <td className="px-2 py-2 text-right">
+                              <button
+                                className="px-2 py-1 rounded-md bg-white/80 dark:bg-white/10 border border-black/10 dark:border-white/10 hover:bg-white"
+                                onClick={() => removeCheckRow(idx)}
+                                title="Eliminar fila"
+                              >
+                                ✕
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="p-2 text-xs opacity-80 text-right">
+                  Total horas (todas las filas):{" "}
+                  <b>
+                    {fmt(checkRows.reduce((a, r) => a + calcHoursForRow(r), 0))}
+                  </b>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ─────────────── NÓMINAS ─────────────── */}
           {section === "nominas" && (
             <>
               {/* TOOLBAR */}
-              <div className="rounded-xl border bg-white dark:bg-neutral-950 dark:border-neutral-800 p-3 shadow-sm flex flex-wrap gap-3 items-center">
-                <input
-                  className="border rounded-lg px-3 py-2 w-72 focus:outline-none focus:ring-2 focus:ring-emerald-400 dark:bg-neutral-900 dark:border-neutral-700"
-                  placeholder="Buscar en todo…"
-                  value={q}
-                  onChange={(e) => {
-                    setQ(e.target.value);
-                    setPage(0);
-                  }}
-                />
-                <select
-                  className="border rounded-lg px-3 py-2 dark:bg-neutral-900 dark:border-neutral-700"
-                  value={nameCol}
-                  onChange={(e) => setNameCol(e.target.value)}
-                >
-                  <option value="">Columna de nombre…</option>
-                  {textCols.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className="border rounded-lg px-3 py-2 dark:bg-neutral-900 dark:border-neutral-700"
-                  value={amountCol}
-                  onChange={(e) => setAmountCol(e.target.value)}
-                >
-                  <option value="">Columna de monto…</option>
-                  {numericCols.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
+              <div className="rounded-2xl p-4 shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-white/70 dark:bg-white/5 backdrop-blur">
+                <div className="flex flex-wrap gap-3 items-center">
+                  <input
+                    className="px-3 py-2 w-72 rounded-xl bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-400"
+                    placeholder="Buscar en todo…"
+                    value={q}
+                    onChange={(e) => {
+                      setQ(e.target.value);
+                      setPage(0);
+                    }}
+                  />
+                  <select
+                    className="px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                    value={nameCol}
+                    onChange={(e) => setNameCol(e.target.value)}
+                  >
+                    <option value="">Columna de nombre…</option>
+                    {textCols.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className="px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                    value={amountCol}
+                    onChange={(e) => setAmountCol(e.target.value)}
+                  >
+                    <option value="">Columna de monto…</option>
+                    {numericCols.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
 
-                <select
-                  className="border rounded-lg px-3 py-2 dark:bg-neutral-900 dark:border-neutral-700"
-                  value={periodo}
-                  onChange={(e) => {
-                    setPeriodo(e.target.value);
-                    setPage(0);
-                  }}
-                  disabled={!periodoCol}
-                  title={periodoCol ? `Usando columna: ${periodoCol}` : "No se detectó columna de periodo"}
-                >
-                  <option value="">
-                    {periodoCol ? "Todos los periodos" : "Sin columna de periodo"}
-                  </option>
-                  {periodosUnicos.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
+                  <select
+                    className="px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                    value={periodo}
+                    onChange={(e) => {
+                      setPeriodo(e.target.value);
+                      setPage(0);
+                    }}
+                    disabled={!periodoCol}
+                    title={
+                      periodoCol
+                        ? `Usando columna: ${periodoCol}`
+                        : "No se detectó columna de periodo"
+                    }
+                  >
+                    <option value="">
+                      {periodoCol ? "Todos los periodos" : "Sin columna de periodo"}
                     </option>
-                  ))}
-                </select>
+                    {periodosUnicos.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
 
-                <button
-                  className="ml-auto px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm transition"
-                  onClick={() => {
-                    const csv = toCSV(datosPeriodo);
-                    const blob = new Blob([csv], { type: "text/csv" });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = periodo ? `nominas_${periodo}.csv` : "nominas_todos.csv";
-                    a.click();
-                    URL.revokeObjectURL(url);
-                  }}
-                  disabled={!datosPeriodo.length}
-                >
-                  Exportar CSV
-                </button>
+                  <button
+                    className="ml-auto px-4 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-fuchsia-600 text-white shadow hover:shadow-lg active:scale-[0.98] transition"
+                    onClick={() => {
+                      const csv = toCSV(datosPeriodo);
+                      const blob = new Blob([csv], { type: "text/csv" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = periodo
+                        ? `nominas_${periodo}.csv`
+                        : "nominas_todos.csv";
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    disabled={!datosPeriodo.length}
+                  >
+                    Exportar CSV
+                  </button>
+
+                  <button
+                    className="px-4 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-black/10 dark:border-white/10 hover:bg-white"
+                    onClick={() => setEditorOpen((v) => !v)}
+                  >
+                    {editorOpen ? "Cerrar editor" : "Nueva semana"}
+                  </button>
+                </div>
               </div>
 
-              {/* CARDS MÉTRICAS */}
-              <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                <div className="bg-white dark:bg-neutral-800 rounded-xl shadow p-4 border border-emerald-200/40 dark:border-neutral-700">
-                  <p className="text-xs text-gray-500 dark:text-neutral-400">
-                    Registros {periodo ? `· ${periodo}` : ""}
-                  </p>
-                  <p className="mt-1 text-2xl font-bold text-emerald-700 dark:text-emerald-400">
-                    {totalRegistros.toLocaleString()}
-                  </p>
+              {/* EDITOR NUEVA SEMANA */}
+              {editorOpen && (
+                <div className="rounded-2xl p-4 shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur space-y-4">
+                  <h3 className="font-semibold">Capturar nómina de nueva semana</h3>
+
+                  {/* Controles de auto-cálculo */}
+                  <div className="flex flex-wrap gap-3 text-xs items-center">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={autoExtra}
+                        onChange={(e) => setAutoExtra(e.target.checked)}
+                      />
+                      $/h extra automático = $/h primaria ×
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      className="w-16 px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                      value={extraMultiplier}
+                      onChange={(e) => setExtraMultiplier(Math.max(0, Number(e.target.value) || 0))}
+                      title="Multiplicador para hora extra"
+                    />
+                    <span className="opacity-60">·</span>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={autoHorasExtra}
+                        onChange={(e) => setAutoHorasExtra(e.target.checked)}
+                      />
+                      Calcular horas extra sobre
+                    </label>
+                    <input
+                      type="number"
+                      className="w-16 px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                      value={extrasThreshold}
+                      onChange={(e) => setExtrasThreshold(Math.max(0, Number(e.target.value) || 0))}
+                      title="Umbral de horas normales por semana"
+                    />
+                    <span className="opacity-60">h/sem</span>
+                  </div>
+
+                  <div className="flex flex-col md:flex-row gap-3">
+                    <input
+                      className="flex-1 px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                      placeholder='Título de semana (ej. "SEMANA #36 DEL 08 AL 14 DE SEPTIEMBRE 2025")'
+                      value={semanaInput}
+                      onChange={(e) => setSemanaInput(e.target.value)}
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-fuchsia-600 text-white shadow hover:shadow-lg"
+                        onClick={addWeekToView}
+                      >
+                        Agregar a la vista
+                      </button>
+                      <button
+                        className="px-4 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-black/10 dark:border-white/10 hover:bg-white"
+                        onClick={downloadWeekJSON}
+                      >
+                        Descargar JSON (solo esta semana)
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="overflow-auto rounded-xl border border-black/10 dark:border-white/10">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gradient-to-r from-sky-600 to-fuchsia-600 text-white">
+                          <th className="px-3 py-2 text-left">Nombre</th>
+                          <th className="px-3 py-2 text-right">Horas primarias</th>
+                          <th className="px-3 py-2 text-right">Horas extras</th>
+                          <th className="px-3 py-2 text-right">$/h primaria</th>
+                          <th className="px-3 py-2 text-right">$/h extra</th>
+                          <th className="px-3 py-2 text-right">Bono semanal</th>
+                          <th className="px-3 py-2 text-right">Descuentos</th>
+                          <th className="px-3 py-2 text-right">Pend. desc.</th>
+                          <th className="px-3 py-2 text-right">Base semanal</th>
+                          <th className="px-3 py-2">Extra</th>
+                          <th className="px-3 py-2"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {draftRows.map((r, idx) => {
+                          const pagoPrim = r.total_horas_primarias * r.costo_hora_primaria;
+                          const pagoExt = r.horas_extras * r.costo_hora_extra;
+                          const calc = pagoPrim + pagoExt;
+                          const total = calc - (r.descuentos || 0);
+                          const total2 = total + (r.bono_semanal || 0);
+                          return (
+                            <tr
+                              key={idx}
+                              className={idx % 2 ? "bg-white/60 dark:bg-white/5" : "bg-white/30 dark:bg-transparent"}
+                            >
+                              <td className="px-3 py-2">
+                                <input
+                                  className="w-44 px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  value={r.nombre}
+                                  onChange={(e) => updateDraft(idx, "nombre", e.target.value)}
+                                  placeholder="Empleado"
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <input
+                                  type="number"
+                                  className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  value={r.total_horas_primarias}
+                                  onChange={(e) =>
+                                    updateDraft(idx, "total_horas_primarias", Number(e.target.value))
+                                  }
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <input
+                                  type="number"
+                                  className="w-24 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  value={r.horas_extras}
+                                  onChange={(e) => updateDraft(idx, "horas_extras", Number(e.target.value))}
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <input
+                                  type="number"
+                                  className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  value={r.costo_hora_primaria}
+                                  onChange={(e) => updateDraft(idx, "costo_hora_primaria", Number(e.target.value))}
+                                  onBlur={(e) => {
+                                    // Refuerzo del autocalculo al salir del campo
+                                    if (autoExtra) {
+                                      const base = Number(e.target.value) || 0;
+                                      const calc = Math.round(base * extraMultiplier * 100) / 100;
+                                      updateDraft(idx, "costo_hora_extra", calc as any);
+                                    }
+                                  }}
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <input
+                                  type="number"
+                                  className="w-24 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  value={r.costo_hora_extra}
+                                  onChange={(e) => updateDraft(idx, "costo_hora_extra", Number(e.target.value))}
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <input
+                                  type="number"
+                                  className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  value={r.bono_semanal}
+                                  onChange={(e) => updateDraft(idx, "bono_semanal", Number(e.target.value))}
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <input
+                                  type="number"
+                                  className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  value={r.descuentos}
+                                  onChange={(e) => updateDraft(idx, "descuentos", Number(e.target.value))}
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <input
+                                  type="number"
+                                  className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  value={r.pendiente_descuento}
+                                  onChange={(e) => updateDraft(idx, "pendiente_descuento", Number(e.target.value))}
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <input
+                                  type="number"
+                                  className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  value={r.pago_semanal_base}
+                                  onChange={(e) => updateDraft(idx, "pago_semanal_base", Number(e.target.value))}
+                                />
+                              </td>
+                              <td className="px-3 py-2">
+                                <input
+                                  className="w-40 px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  value={r.extra || ""}
+                                  onChange={(e) => updateDraft(idx, "extra", e.target.value)}
+                                  placeholder="Nota/extra"
+                                />
+                              </td>
+                              <td className="px-3 py-2">
+                                <button
+                                  className="px-2 py-1 rounded-lg bg-white/80 dark:bg-white/10 border border-black/10 dark:border-white/10 hover:bg-white"
+                                  onClick={() => removeDraftRow(idx)}
+                                  title="Eliminar fila"
+                                >
+                                  ✕
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs opacity-80">
+                    <div>
+                      <button
+                        className="px-3 py-1.5 rounded-xl bg-white/80 dark:bg-white/10 border border-black/10 dark:border-white/10 hover:bg-white"
+                        onClick={addDraftRow}
+                      >
+                        + Agregar empleado
+                      </button>
+                    </div>
+                    <div className="text-right">
+                      {(() => {
+                        const prim = draftRows.reduce(
+                          (a, r) => a + r.total_horas_primarias * r.costo_hora_primaria,
+                          0
+                        );
+                        const ext = draftRows.reduce(
+                          (a, r) => a + r.horas_extras * r.costo_hora_extra,
+                          0
+                        );
+                        const bonos = draftRows.reduce((a, r) => a + (r.bono_semanal || 0), 0);
+                        const desc = draftRows.reduce((a, r) => a + (r.descuentos || 0), 0);
+                        const calc = prim + ext;
+                        const total = calc - desc + bonos;
+                        return (
+                          <div>
+                            <div>Pago primarias: <b>{fmt(prim)}</b> · Pago extras: <b>{fmt(ext)}</b></div>
+                            <div>Bonos: <b>{fmt(bonos)}</b> · Descuentos: <b>{fmt(desc)}</b></div>
+                            <div>Total estimado semana: <b>{fmt(total)}</b></div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
                 </div>
-                <div className="bg-white dark:bg-neutral-800 rounded-xl shadow p-4 border border-emerald-200/40 dark:border-neutral-700">
-                  <p className="text-xs text-gray-500 dark:text-neutral-400">
-                    Empleados únicos
-                  </p>
-                  <p className="mt-1 text-2xl font-bold text-emerald-700 dark:text-emerald-400">
-                    {empleadosUnicos.toLocaleString()}
-                  </p>
-                </div>
-                <div className="bg-white dark:bg-neutral-800 rounded-xl shadow p-4 border border-emerald-200/40 dark:border-neutral-700">
-                  <p className="text-xs text-gray-500 dark:text-neutral-400">
-                    Suma ({amountCol || "monto"})
-                  </p>
-                  <p className="mt-1 text-2xl font-bold text-emerald-700 dark:text-emerald-400">
-                    {sumaMontos.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </p>
-                </div>
-                <div className="bg-white dark:bg-neutral-800 rounded-xl shadow p-4 border border-emerald-200/40 dark:border-neutral-700">
-                  <p className="text-xs text-gray-500 dark:text-neutral-400">
-                    Hojas
-                  </p>
-                  <p className="mt-1 text-2xl font-bold text-emerald-700 dark:text-emerald-400">
-                    {hojasUnicas.toLocaleString()}
-                  </p>
-                </div>
+              )}
+
+              {/* MÉTRICAS – TARJETAS */}
+              <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                <MetricCard title={`Registros${periodo ? ` · ${periodo}` : ""}`} value={totalRegistros.toLocaleString()} from="from-sky-500" to="to-cyan-500" />
+                <MetricCard title="Empleados únicos" value={empleadosUnicos.toLocaleString()} from="from-violet-500" to="to-fuchsia-500" />
+                <MetricCard title={`Suma (${amountCol || "monto"})`} value={fmt(sumaMontos)} from="from-emerald-500" to="to-teal-500" />
+                <MetricCard title="Hojas" value={hojasUnicas.toLocaleString()} from="from-amber-500" to="to-orange-500" />
               </section>
 
               {/* TABLA + TOP */}
@@ -350,21 +1015,17 @@ export default function App() {
                 {/* Tabla */}
                 <div className="lg:col-span-2">
                   {rawData.length === 0 ? (
-                    <p className="text-sm text-gray-600 dark:text-neutral-400">
-                      Cargando datos… asegúrate de tener{" "}
-                      <code>public/nominas_merged_clean.json</code>
+                    <p className="text-sm opacity-70">
+                      Cargando datos… asegúrate de tener <code>public/nominas_merged_clean.json</code>
                     </p>
                   ) : (
                     <>
-                      <div className="overflow-auto rounded-xl shadow bg-white dark:bg-neutral-800 border border-emerald-200/40 dark:border-neutral-700">
+                      <div className="overflow-auto rounded-2xl shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
                         <table className="w-full text-sm">
-                          <thead className="bg-emerald-600 text-white sticky top-0">
-                            <tr>
+                          <thead className="sticky top-0">
+                            <tr className="bg-gradient-to-r from-sky-600 to-fuchsia-600 text-white">
                               {visibleCols.map((col) => (
-                                <th
-                                  key={col}
-                                  className="px-3 py-2 text-left font-medium"
-                                >
+                                <th key={col} className="px-3 py-2 text-left font-medium">
                                   {col}
                                 </th>
                               ))}
@@ -374,13 +1035,10 @@ export default function App() {
                             {sliced.map((row, i) => (
                               <tr
                                 key={i}
-                                className={`${i % 2 ? "bg-gray-50 dark:bg-neutral-700/50" : "bg-white dark:bg-neutral-800"} hover:bg-emerald-50/60 dark:hover:bg-neutral-700 transition`}
+                                className={`${i % 2 ? "bg-white/70 dark:bg-white/5" : "bg-white/40 dark:bg-white/0"} hover:bg-sky-50/80 dark:hover:bg-white/10 transition`}
                               >
                                 {visibleCols.map((col) => (
-                                  <td
-                                    key={col}
-                                    className="px-3 py-2 border-b border-gray-100 dark:border-neutral-700"
-                                  >
+                                  <td key={col} className="px-3 py-2">
                                     {String(row[col] ?? "")}
                                   </td>
                                 ))}
@@ -390,85 +1048,161 @@ export default function App() {
                         </table>
                       </div>
 
-                      <div className="flex items-center justify-between mt-2">
-                        <span className="text-xs text-gray-500 dark:text-neutral-400">
-                          {datosPeriodo.length.toLocaleString()} filas · página {page + 1} de {totalPages}
-                        </span>
-                        <div className="flex gap-2">
-                          <button
-                            className="px-3 py-1 rounded-lg bg-white dark:bg-neutral-800 border border-emerald-200/40 dark:border-neutral-700 hover:bg-gray-50 dark:hover:bg-neutral-700"
-                            onClick={() => setPage((p) => Math.max(0, p - 1))}
-                          >
-                            Anterior
-                          </button>
-                          <button
-                            className="px-3 py-1 rounded-lg bg-white dark:bg-neutral-800 border border-emerald-200/40 dark:border-neutral-700 hover:bg-gray-50 dark:hover:bg-neutral-700"
-                            onClick={() =>
-                              setPage((p) => Math.min(totalPages - 1, p + 1))
-                            }
-                          >
-                            Siguiente
-                          </button>
+                      {/* Paginación + título debajo */}
+                      <div className="flex flex-col gap-2 mt-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs opacity-70">
+                            {datosPeriodo.length.toLocaleString()} filas · página {page + 1} de {totalPages}
+                          </span>
+                          <div className="flex gap-2">
+                            <button
+                              className="px-3 py-1 rounded-xl bg-white/80 dark:bg-white/10 border border-black/10 dark:border-white/10 hover:bg-white"
+                              onClick={() => setPage((p) => Math.max(0, p - 1))}
+                            >
+                              Anterior
+                            </button>
+                            <button
+                              className="px-3 py-1 rounded-xl bg-white/80 dark:bg-white/10 border border-black/10 dark:border-white/10 hover:bg-white"
+                              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                            >
+                              Siguiente
+                            </button>
+                          </div>
                         </div>
+
+                        {sectionTitle && (
+                          <div className="text-center">
+                            <div className="inline-block px-3 py-1 rounded-lg bg-white/70 dark:bg-white/10 ring-1 ring-black/5 dark:ring-white/10 text-sm font-semibold">
+                              {sectionTitle}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </>
                   )}
                 </div>
 
                 {/* Top 15 */}
-                <div className="rounded-xl shadow bg-white dark:bg-neutral-800 border border-emerald-200/40 dark:border-neutral-700 p-4">
+                <div className="rounded-2xl p-4 shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-white/70 dark:bg-white/5 backdrop-blur">
                   <h2 className="font-semibold mb-3">
                     Top 15 por total ({amountCol || "monto"})
                     {periodo ? ` · ${periodo}` : ""}
                   </h2>
                   {!nameCol || !amountCol ? (
-                    <p className="text-sm text-gray-600 dark:text-neutral-400">
-                      Selecciona columnas de nombre y monto.
-                    </p>
+                    <p className="text-sm opacity-70">Selecciona columnas de nombre y monto.</p>
                   ) : topTotales.length === 0 ? (
-                    <p className="text-sm text-gray-600 dark:text-neutral-400">
-                      Sin datos.
-                    </p>
+                    <p className="text-sm opacity-70">Sin datos.</p>
                   ) : (
-                    <ol className="list-decimal pl-5 space-y-1 text-sm">
-                      {topTotales.map((t, idx) => (
-                        <li key={idx} className="flex justify-between gap-4">
-                          <span className="truncate">{t.name}</span>
-                          <span className="font-mono">
-                            {t.total.toLocaleString(undefined, {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
-                          </span>
-                        </li>
-                      ))}
-                    </ol>
+                    <ul className="space-y-2">
+                      {topTotales.map((t, idx) => {
+                        const pct = maxTop > 0 ? Math.max(2, (t.total / maxTop) * 100) : 0;
+                        return (
+                          <li key={idx}>
+                            <div className="flex justify-between text-xs mb-1">
+                              <span className="truncate pr-2">{t.name}</span>
+                              <span className="font-mono">{fmt(t.total)}</span>
+                            </div>
+                            <div className="h-2 rounded-full bg-black/10 dark:bg-white/10">
+                              <div className="h-2 rounded-full bg-gradient-to-r from-sky-500 via-violet-500 to-fuchsia-500" style={{ width: `${pct}%` }} />
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
                   )}
                 </div>
               </section>
             </>
           )}
 
-          {section === "reportes" && (
-            <div className="rounded-xl shadow bg-white dark:bg-neutral-800 border border-emerald-200/40 dark:border-neutral-700 p-6">
-              <h2 className="text-lg font-semibold">Reportes</h2>
-              <p className="text-sm text-gray-600 dark:text-neutral-400 mt-1">
-                Exporta CSV por periodo, empleado o centro de costos. (Configuramos
-                estos filtros cuando confirmes los campos exactos.)
-              </p>
-            </div>
-          )}
+          {/* ─────────────── EMPLEADOS ─────────────── */}
 
+          {/* EMPLEADOS */}
           {section === "empleados" && (
-            <div className="rounded-xl shadow bg-white dark:bg-neutral-800 border border-emerald-200/40 dark:border-neutral-700 p-6">
-              <h2 className="text-lg font-semibold">Empleados</h2>
-              <p className="text-sm text-gray-600 dark:text-neutral-400 mt-1">
-                Aquí podemos listar empleados únicos, buscar uno y ver su
-                historial de nómina. (Se arma en cuanto confirmes la columna.)
-              </p>
-            </div>
-          )}
+  <div className="space-y-4">
+    {/* Barra de acciones */}
+    <div className="flex gap-2">
+      <button className="px-3 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-fuchsia-500 text-white text-sm shadow">
+        + Nuevo empleado
+      </button>
+      <button className="px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border text-sm">
+        Importar CSV
+      </button>
+      <button className="px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border text-sm">
+        Exportar CSV
+      </button>
+    </div>
+
+    {/* Tabla empleados */}
+    <div className="overflow-auto rounded-2xl shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
+      <table className="w-full text-sm min-w-[900px]">
+        <thead className="sticky top-0">
+          <tr className="bg-gradient-to-r from-sky-600 to-fuchsia-600 text-white">
+            <th className="px-3 py-2 text-left">Nombre</th>
+            <th className="px-3 py-2">Puesto</th>
+            <th className="px-3 py-2">Área</th>
+            <th className="px-3 py-2">Estatus</th>
+            <th className="px-3 py-2">$/h</th>
+            <th className="px-3 py-2">Extra×</th>
+            <th className="px-3 py-2">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {/* De momento datos de ejemplo */}
+          {[
+            { nombre: "SERGIO", puesto: "Operador", area: "Planta", estatus: "Activo", tarifa: 60, extra: 1.5 },
+            { nombre: "VALERIA", puesto: "Administrativo", area: "Oficina", estatus: "Activo", tarifa: 45, extra: 2 },
+          ].map((emp, idx) => (
+            <tr
+              key={idx}
+              className={idx % 2 ? "bg-white/70 dark:bg-white/5" : "bg-white/40 dark:bg-transparent"}
+            >
+              <td className="px-3 py-2">{emp.nombre}</td>
+              <td className="px-3 py-2 text-center">{emp.puesto}</td>
+              <td className="px-3 py-2 text-center">{emp.area}</td>
+              <td className="px-3 py-2 text-center">{emp.estatus}</td>
+              <td className="px-3 py-2 text-right">{emp.tarifa}</td>
+              <td className="px-3 py-2 text-right">{emp.extra}×</td>
+              <td className="px-3 py-2 text-center">
+                <button className="px-2 py-1 rounded-lg bg-sky-500 text-white text-xs">
+                  Editar
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+)}
         </main>
+      </div>
+    </div>
+  );
+}
+
+/* ───── Componentes auxiliares ─────────────────────────────────── */
+function MetricCard({
+  title,
+  value,
+  from,
+  to,
+}: {
+  title: string;
+  value: string;
+  from: string;
+  to: string;
+}) {
+  return (
+    <div className="relative rounded-2xl shadow-xl">
+      <div className={`absolute inset-0 rounded-2xl bg-gradient-to-r ${from} ${to} opacity-90`} />
+      <div className="relative rounded-2xl p-[1px]">
+        <div className="rounded-2xl bg-white/80 dark:bg-[#0b1020]/70 backdrop-blur ring-1 ring-black/5 dark:ring-white/10 p-4">
+          <p className="text-xs opacity-80">{title}</p>
+          <p className="mt-1 text-2xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-slate-900 via-slate-700 to-slate-900 dark:from-white dark:via-white/90 dark:to-white">
+            {value}
+          </p>
+        </div>
       </div>
     </div>
   );
