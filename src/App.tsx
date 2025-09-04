@@ -569,18 +569,18 @@ export default function App() {
 
   /* ────────────────────────────────────────────────────────────── UI  */
   return (
-    <div className="min-h-screen bg-gradient-to-br from-sky-50 via-indigo-50 to-fuchsia-50 dark:from-[#0b1020] dark:via-[#0a0f1a] dark:to-[#0a0f1a] text-slate-800 dark:text-slate-100 transition-colors">
+    <div className="min-h-screen bg-gradient-to-br from-petro-off to-petro-paper dark:from-petro-ink dark:to-petro-charcoal text-petro-ink dark:text-petro-paper transition-colors">
       {/* HEADER */}
-      <header className="sticky top-0 z-20 backdrop-blur supports-[backdrop-filter]:bg-white/50 dark:supports-[backdrop-filter]:bg-[#0b1020]/60 border-b border-white/50 dark:border-white/10">
+      <header className="sticky top-0 z-20 backdrop-blur supports-[backdrop-filter]:bg-white/50 dark:supports-[backdrop-filter]:bg-petro-charcoal/60 border-b border-petro-line/60 dark:border-white/10">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
-          <div className="text-transparent bg-clip-text bg-gradient-to-r from-sky-600 via-violet-600 to-fuchsia-600 dark:from-sky-400 dark:via-violet-400 dark:to-fuchsia-400 text-xl font-extrabold tracking-tight select-none">
+          <div className="text-transparent bg-clip-text bg-gradient-to-r from-petro-red to-petro-redDark text-xl font-extrabold tracking-tight select-none">
             PetroArte
           </div>
           <span className="opacity-60 text-sm">· Panel de Gestión</span>
           <div className="ml-auto flex items-center gap-2">
             <button
               onClick={() => setDark(!dark)}
-              className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-sky-600 to-fuchsia-600 text-white text-sm shadow hover:shadow-md active:scale-[0.98] transition"
+              className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-petro-red to-petro-redDark text-white text-sm shadow hover:shadow-md active:scale-[0.98] transition"
               title="Cambiar tema claro/oscuro"
             >
               {dark ? "🌙 Oscuro" : "☀️ Claro"}
@@ -593,7 +593,7 @@ export default function App() {
       <div className="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 md:grid-cols-[230px_1fr] gap-6">
         {/* SIDEBAR */}
         <aside className="hidden md:block">
-          <div className="rounded-2xl p-3 bg-gradient-to-b from-sky-500/90 via-violet-500/90 to-fuchsia-500/90 text-white shadow-xl ring-1 ring-white/30">
+          <div className="rounded-2xl p-3 bg-gradient-to-b from-petro-redDark to-petro-red text-white shadow-xl ring-1 ring-white/30">
             <div className="px-2 py-2 text-sm/relaxed opacity-90">Navegación</div>
             <nav className="space-y-2 mt-1">
               {(["nominas", "checkin", "empleados"] as Section[]).map((s) => (
@@ -622,22 +622,22 @@ export default function App() {
           {/* ─────────────── CHECK-IN ─────────────── */}
           {section === "checkin" && (
             <div className="space-y-4">
-              <div className="rounded-2xl p-4 shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-white/70 dark:bg-white/5 backdrop-blur">
+              <div className="rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/70 dark:bg-white/5 backdrop-blur">
                 <div className="flex flex-wrap gap-2 items-center">
                   <button
-                    className="px-3 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-fuchsia-500 text-white text-sm shadow"
+                    className="px-3 py-2 rounded-xl bg-gradient-to-r from-petro-red to-petro-redDark text-white text-sm shadow"
                     onClick={addCheckRow}
                   >
                     + Agregar fila
                   </button>
                   <button
-                    className="px-3 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-black/10 dark:border-white/10 text-sm"
+                    className="px-3 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-sm"
                     onClick={loadUserTemplate}
                   >
-                    Cargar plantilla (lo que me mandaste)
+                    Cargar plantilla (14 filas)
                   </button>
                   <button
-                    className="ml-auto px-3 py-2 rounded-xl bg-gradient-to-r from-fuchsia-500 to-sky-500 text-white text-sm shadow"
+                    className="ml-auto px-3 py-2 rounded-xl bg-gradient-to-r from-petro-redDark to-petro-red text-white text-sm shadow"
                     onClick={pushCheckinToDraft}
                   >
                     Enviar a “Nueva semana”
@@ -645,8 +645,8 @@ export default function App() {
                 </div>
               </div>
 
-              {/* SCROLL CONTROLADO (no se sale del viewport) */}
-              <div className="rounded-2xl shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
+              {/* SCROLL CONTROLADO */}
+              <div className="rounded-2xl shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
                 <div className="overflow-x-auto">
                   <table className="w-full table-fixed border-collapse text-[13px]">
                     <colgroup>
@@ -661,7 +661,7 @@ export default function App() {
                       <col className="w-[60px]" />
                     </colgroup>
                     <thead>
-                      <tr className="bg-gradient-to-r from-sky-600 to-fuchsia-600 text-white">
+                      <tr className="bg-gradient-to-r from-petro-red to-petro-redDark text-white">
                         <th className="px-3 py-2 text-left">Nombre</th>
                         {["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"].map((d) => (
                           <th key={d} className="px-2 py-2 text-center">{d}</th>
@@ -680,7 +680,7 @@ export default function App() {
                               <div className="flex gap-2">
                                 <input
                                   list={`empleados-list-${idx}`}
-                                  className="w-full min-w-0 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  className="w-full min-w-0 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                                   value={r.nombre}
                                   onChange={(e) => updateCheckName(idx, e.target.value)}
                                   placeholder={`Empleado ${idx + 1}`}
@@ -697,14 +697,14 @@ export default function App() {
                                 <div className="flex items-center gap-1">
                                   <input
                                     type="time"
-                                    className="w-full min-w-0 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                    className="w-full min-w-0 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                                     value={(r[day] as DayPair).in}
                                     onChange={(e) => updateCheck(idx, day, "in", e.target.value)}
                                   />
                                   <span className="opacity-50">→</span>
                                   <input
                                     type="time"
-                                    className="w-full min-w-0 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                    className="w-full min-w-0 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                                     value={(r[day] as DayPair).out}
                                     onChange={(e) => updateCheck(idx, day, "out", e.target.value)}
                                   />
@@ -714,7 +714,7 @@ export default function App() {
                             <td className="px-2 py-2 text-right font-mono">{fmt(total)}</td>
                             <td className="px-2 py-2 text-right">
                               <button
-                                className="px-2 py-1 rounded-md bg-white/80 dark:bg-white/10 border border-black/10 dark:border-white/10 hover:bg-white"
+                                className="px-2 py-1 rounded-md bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 hover:bg-white"
                                 onClick={() => removeCheckRow(idx)}
                                 title="Eliminar fila"
                               >
@@ -742,10 +742,10 @@ export default function App() {
           {section === "nominas" && (
             <>
               {/* TOOLBAR */}
-              <div className="rounded-2xl p-4 shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-white/70 dark:bg-white/5 backdrop-blur">
+              <div className="rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/70 dark:bg-white/5 backdrop-blur">
                 <div className="flex flex-wrap gap-3 items-center">
                   <input
-                    className="px-3 py-2 w-72 rounded-xl bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-400"
+                    className="px-3 py-2 w-72 rounded-xl bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-petro-red"
                     placeholder="Buscar en todo…"
                     value={q}
                     onChange={(e) => {
@@ -754,7 +754,7 @@ export default function App() {
                     }}
                   />
                   <select
-                    className="px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                    className="px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                     value={nameCol}
                     onChange={(e) => setNameCol(e.target.value)}
                   >
@@ -766,7 +766,7 @@ export default function App() {
                     ))}
                   </select>
                   <select
-                    className="px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                    className="px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                     value={amountCol}
                     onChange={(e) => setAmountCol(e.target.value)}
                   >
@@ -777,9 +777,9 @@ export default function App() {
                       </option>
                     ))}
                   </select>
-                  
+
                   <button
-                    className="ml-auto px-4 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-fuchsia-600 text-white shadow hover:shadow-lg active:scale-[0.98] transition"
+                    className="ml-auto px-4 py-2 rounded-xl bg-gradient-to-r from-petro-red to-petro-redDark text-white shadow hover:shadow-lg active:scale-[0.98] transition"
                     onClick={() => {
                       const csv = toCSV(datosPeriodo);
                       const blob = new Blob([csv], { type: "text/csv" });
@@ -798,7 +798,7 @@ export default function App() {
                   </button>
 
                   <button
-                    className="px-4 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-black/10 dark:border-white/10 hover:bg-white"
+                    className="px-4 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 hover:bg-white"
                     onClick={() => setEditorOpen((v) => !v)}
                   >
                     {editorOpen ? "Cerrar editor" : "Nueva semana"}
@@ -808,8 +808,8 @@ export default function App() {
 
               {/* EDITOR NUEVA SEMANA */}
               {editorOpen && (
-                <div className="rounded-2xl p-4 shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur space-y-4">
-                  <h3 className="font-semibold">Capturar nómina de nueva semana</h3>
+                <div className="rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur space-y-4">
+                  <h3 className="font-semibold text-petro-redDark">Capturar nómina de nueva semana</h3>
 
                   {/* Controles de auto-cálculo */}
                   <div className="flex flex-wrap gap-3 text-xs items-center">
@@ -824,7 +824,7 @@ export default function App() {
                     <input
                       type="number"
                       step="0.1"
-                      className="w-16 px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                      className="w-16 px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                       value={extraMultiplier}
                       onChange={(e) => setExtraMultiplier(Math.max(0, Number(e.target.value) || 0))}
                       title="Multiplicador para hora extra"
@@ -840,7 +840,7 @@ export default function App() {
                     </label>
                     <input
                       type="number"
-                      className="w-16 px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                      className="w-16 px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                       value={extrasThreshold}
                       onChange={(e) => setExtrasThreshold(Math.max(0, Number(e.target.value) || 0))}
                       title="Umbral de horas normales por semana"
@@ -850,20 +850,20 @@ export default function App() {
 
                   <div className="flex flex-col md:flex-row gap-3">
                     <input
-                      className="flex-1 px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                      className="flex-1 px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                       placeholder='Título de semana (ej. "SEMANA #36 DEL 08 AL 14 DE SEPTIEMBRE 2025")'
                       value={semanaInput}
                       onChange={(e) => setSemanaInput(e.target.value)}
                     />
                     <div className="flex gap-2">
                       <button
-                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-fuchsia-600 text-white shadow hover:shadow-lg"
+                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-petro-red to-petro-redDark text-white shadow hover:shadow-lg"
                         onClick={addWeekToView}
                       >
                         Agregar a la vista
                       </button>
                       <button
-                        className="px-4 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-black/10 dark:border-white/10 hover:bg-white"
+                        className="px-4 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 hover:bg-white"
                         onClick={downloadWeekJSON}
                       >
                         Descargar JSON (solo esta semana)
@@ -871,10 +871,10 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="overflow-auto rounded-xl border border-black/10 dark:border-white/10">
+                  <div className="overflow-auto rounded-xl border border-petro-line/60 dark:border-white/10">
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="bg-gradient-to-r from-sky-600 to-fuchsia-600 text-white">
+                        <tr className="bg-gradient-to-r from-petro-red to-petro-redDark text-white">
                           <th className="px-3 py-2 text-left">Nombre</th>
                           <th className="px-3 py-2 text-right">Horas primarias</th>
                           <th className="px-3 py-2 text-right">Horas extras</th>
@@ -902,7 +902,7 @@ export default function App() {
                             >
                               <td className="px-3 py-2">
                                 <input
-                                  className="w-44 px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  className="w-44 px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                                   value={r.nombre}
                                   onChange={(e) => updateDraft(idx, "nombre", e.target.value)}
                                   placeholder="Empleado"
@@ -912,7 +912,7 @@ export default function App() {
                               <td className="px-3 py-2 text-right">
                                 <input
                                   type="number"
-                                  className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                                   value={r.total_horas_primarias}
                                   onChange={(e) =>
                                     updateDraft(idx, "total_horas_primarias", Number(e.target.value))
@@ -922,7 +922,7 @@ export default function App() {
                               <td className="px-3 py-2 text-right">
                                 <input
                                   type="number"
-                                  className="w-24 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  className="w-24 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                                   value={r.horas_extras}
                                   onChange={(e) => updateDraft(idx, "horas_extras", Number(e.target.value))}
                                 />
@@ -930,7 +930,7 @@ export default function App() {
                               <td className="px-3 py-2 text-right">
                                 <input
                                   type="number"
-                                  className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                                   value={r.costo_hora_primaria}
                                   onChange={(e) => updateDraft(idx, "costo_hora_primaria", Number(e.target.value))}
                                   onBlur={(e) => {
@@ -945,7 +945,7 @@ export default function App() {
                               <td className="px-3 py-2 text-right">
                                 <input
                                   type="number"
-                                  className="w-24 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  className="w-24 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                                   value={r.costo_hora_extra}
                                   onChange={(e) => updateDraft(idx, "costo_hora_extra", Number(e.target.value))}
                                 />
@@ -953,7 +953,7 @@ export default function App() {
                               <td className="px-3 py-2 text-right">
                                 <input
                                   type="number"
-                                  className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                                   value={r.bono_semanal}
                                   onChange={(e) => updateDraft(idx, "bono_semanal", Number(e.target.value))}
                                 />
@@ -961,7 +961,7 @@ export default function App() {
                               <td className="px-3 py-2 text-right">
                                 <input
                                   type="number"
-                                  className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                                   value={r.descuentos}
                                   onChange={(e) => updateDraft(idx, "descuentos", Number(e.target.value))}
                                 />
@@ -969,7 +969,7 @@ export default function App() {
                               <td className="px-3 py-2 text-right">
                                 <input
                                   type="number"
-                                  className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                                   value={r.pendiente_descuento}
                                   onChange={(e) => updateDraft(idx, "pendiente_descuento", Number(e.target.value))}
                                 />
@@ -977,14 +977,14 @@ export default function App() {
                               <td className="px-3 py-2 text-right">
                                 <input
                                   type="number"
-                                  className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                                   value={r.pago_semanal_base}
                                   onChange={(e) => updateDraft(idx, "pago_semanal_base", Number(e.target.value))}
                                 />
                               </td>
                               <td className="px-3 py-2">
                                 <input
-                                  className="w-40 px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  className="w-40 px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                                   value={r.extra || ""}
                                   onChange={(e) => updateDraft(idx, "extra", e.target.value)}
                                   placeholder="Nota/extra"
@@ -992,7 +992,7 @@ export default function App() {
                               </td>
                               <td className="px-3 py-2">
                                 <button
-                                  className="px-2 py-1 rounded-lg bg-white/80 dark:bg-white/10 border border-black/10 dark:border-white/10 hover:bg-white"
+                                  className="px-2 py-1 rounded-lg bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 hover:bg-white"
                                   onClick={() => removeDraftRow(idx)}
                                   title="Eliminar fila"
                                 >
@@ -1004,7 +1004,6 @@ export default function App() {
                         })}
                       </tbody>
                     </table>
-                    {/* datalist de nombres para el editor también */}
                     <datalist id="empleados-nombres">
                       {empleados.map((e) => (
                         <option key={e.id} value={e.nombre} />
@@ -1015,7 +1014,7 @@ export default function App() {
                   <div className="flex items-center justify-between text-xs opacity-80">
                     <div>
                       <button
-                        className="px-3 py-1.5 rounded-xl bg-white/80 dark:bg-white/10 border border-black/10 dark:border-white/10 hover:bg-white"
+                        className="px-3 py-1.5 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 hover:bg-white"
                         onClick={addDraftRow}
                       >
                         + Agregar empleado
@@ -1050,10 +1049,10 @@ export default function App() {
 
               {/* MÉTRICAS – TARJETAS */}
               <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-                <MetricCard title={`Registros${periodo ? ` · ${periodo}` : ""}`} value={totalRegistros.toLocaleString()} from="from-sky-500" to="to-cyan-500" />
-                <MetricCard title="Empleados únicos" value={empleadosUnicos.toLocaleString()} from="from-violet-500" to="to-fuchsia-500" />
-                <MetricCard title={`Suma (${amountCol || "monto"})`} value={fmt(sumaMontos)} from="from-emerald-500" to="to-teal-500" />
-                <MetricCard title="Hojas" value={hojasUnicas.toLocaleString()} from="from-amber-500" to="to-orange-500" />
+                <MetricCard title={`Registros${periodo ? ` · ${periodo}` : ""}`} value={totalRegistros.toLocaleString()} from="from-petro-red" to="to-petro-redDark" />
+                <MetricCard title="Empleados únicos" value={empleadosUnicos.toLocaleString()} from="from-petro-charcoal" to="to-petro-ink" />
+                <MetricCard title={`Suma (${amountCol || "monto"})`} value={fmt(sumaMontos)} from="from-petro-redLight" to="to-petro-red" />
+                <MetricCard title="Hojas" value={hojasUnicas.toLocaleString()} from="from-petro-ink" to="to-petro-charcoal" />
               </section>
 
               {/* TABLA + TOP */}
@@ -1066,10 +1065,10 @@ export default function App() {
                     </p>
                   ) : (
                     <>
-                      <div className="overflow-auto rounded-2xl shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
+                      <div className="overflow-auto rounded-2xl shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
                         <table className="w-full text-sm">
                           <thead className="sticky top-0">
-                            <tr className="bg-gradient-to-r from-sky-600 to-fuchsia-600 text-white">
+                            <tr className="bg-gradient-to-r from-petro-red to-petro-redDark text-white">
                               {visibleCols.map((col) => (
                                 <th key={col} className="px-3 py-2 text-left font-medium">
                                   {col}
@@ -1081,7 +1080,7 @@ export default function App() {
                             {sliced.map((row, i) => (
                               <tr
                                 key={i}
-                                className={`${i % 2 ? "bg-white/70 dark:bg-white/5" : "bg-white/40 dark:bg-white/0"} hover:bg-sky-50/80 dark:hover:bg-white/10 transition`}
+                                className={`${i % 2 ? "bg-white/70 dark:bg-white/5" : "bg-white/40 dark:bg-white/0"} hover:bg-petro-off/80 dark:hover:bg-white/10 transition`}
                               >
                                 {visibleCols.map((col) => (
                                   <td key={col} className="px-3 py-2">
@@ -1102,13 +1101,13 @@ export default function App() {
                           </span>
                           <div className="flex gap-2">
                             <button
-                              className="px-3 py-1 rounded-xl bg-white/80 dark:bg-white/10 border border-black/10 dark:border-white/10 hover:bg-white"
+                              className="px-3 py-1 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 hover:bg-white"
                               onClick={() => setPage((p) => Math.max(0, p - 1))}
                             >
                               Anterior
                             </button>
                             <button
-                              className="px-3 py-1 rounded-xl bg-white/80 dark:bg-white/10 border border-black/10 dark:border-white/10 hover:bg-white"
+                              className="px-3 py-1 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 hover:bg-white"
                               onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
                             >
                               Siguiente
@@ -1118,7 +1117,7 @@ export default function App() {
 
                         {sectionTitle && (
                           <div className="text-center">
-                            <div className="inline-block px-3 py-1 rounded-lg bg-white/70 dark:bg-white/10 ring-1 ring-black/5 dark:ring-white/10 text-sm font-semibold">
+                            <div className="inline-block px-3 py-1 rounded-lg bg-white/70 dark:bg-white/10 ring-1 ring-petro-line/60 dark:ring-white/10 text-sm font-semibold">
                               {sectionTitle}
                             </div>
                           </div>
@@ -1129,7 +1128,7 @@ export default function App() {
                 </div>
 
                 {/* Top 15 */}
-                <div className="rounded-2xl p-4 shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-white/70 dark:bg-white/5 backdrop-blur">
+                <div className="rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/70 dark:bg-white/5 backdrop-blur">
                   <h2 className="font-semibold mb-3">
                     Top 15 por total ({amountCol || "monto"})
                     {periodo ? ` · ${periodo}` : ""}
@@ -1148,8 +1147,8 @@ export default function App() {
                               <span className="truncate pr-2">{t.name}</span>
                               <span className="font-mono">{fmt(t.total)}</span>
                             </div>
-                            <div className="h-2 rounded-full bg-black/10 dark:bg-white/10">
-                              <div className="h-2 rounded-full bg-gradient-to-r from-sky-500 via-violet-500 to-fuchsia-500" style={{ width: `${pct}%` }} />
+                            <div className="h-2 rounded-full bg-petro-line/50 dark:bg-white/10">
+                              <div className="h-2 rounded-full bg-gradient-to-r from-petro-red to-petro-redDark" style={{ width: `${pct}%` }} />
                             </div>
                           </li>
                         );
@@ -1167,7 +1166,7 @@ export default function App() {
               {/* Barra de acciones */}
               <div className="flex flex-wrap gap-2">
                 <button
-                  className="px-3 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-fuchsia-500 text-white text-sm shadow"
+                  className="px-3 py-2 rounded-xl bg-gradient-to-r from-petro-red to-petro-redDark text-white text-sm shadow"
                   onClick={() =>
                     setEmpleados((prev) => [
                       ...prev,
@@ -1186,7 +1185,7 @@ export default function App() {
                   + Nuevo empleado
                 </button>
                 <button
-                  className="px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border text-sm"
+                  className="px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-petro-line/60 text-sm"
                   onClick={() => {
                     const csv = toCSV(
                       empleados.map((e) => ({
@@ -1213,10 +1212,10 @@ export default function App() {
               </div>
 
               {/* Tabla empleados */}
-              <div className="overflow-auto rounded-2xl shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
+              <div className="overflow-auto rounded-2xl shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
                 <table className="w-full text-sm min-w-[900px]">
                   <thead className="sticky top-0">
-                    <tr className="bg-gradient-to-r from-sky-600 to-fuchsia-600 text-white">
+                    <tr className="bg-gradient-to-r from-petro-red to-petro-redDark text-white">
                       <th className="px-3 py-2 text-left">Nombre</th>
                       <th className="px-3 py-2">Puesto</th>
                       <th className="px-3 py-2">Área</th>
@@ -1234,7 +1233,7 @@ export default function App() {
                       >
                         <td className="px-3 py-2">
                           <input
-                            className="w-full px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                            className="w-full px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                             value={emp.nombre}
                             onChange={(e) =>
                               setEmpleados((prev) =>
@@ -1246,7 +1245,7 @@ export default function App() {
                         </td>
                         <td className="px-3 py-2 text-center">
                           <input
-                            className="w-36 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10 text-center"
+                            className="w-36 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-center"
                             value={emp.puesto}
                             onChange={(e) =>
                               setEmpleados((prev) =>
@@ -1257,7 +1256,7 @@ export default function App() {
                         </td>
                         <td className="px-3 py-2 text-center">
                           <input
-                            className="w-28 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10 text-center"
+                            className="w-28 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-center"
                             value={emp.area}
                             onChange={(e) =>
                               setEmpleados((prev) =>
@@ -1268,7 +1267,7 @@ export default function App() {
                         </td>
                         <td className="px-3 py-2 text-center">
                           <select
-                            className="px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                            className="px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                             value={emp.estatus}
                             onChange={(e) =>
                               setEmpleados((prev) =>
@@ -1285,7 +1284,7 @@ export default function App() {
                         <td className="px-3 py-2 text-right">
                           <input
                             type="number"
-                            className="w-24 text-right px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                            className="w-24 text-right px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                             value={emp.tarifa}
                             onChange={(e) =>
                               setEmpleados((prev) =>
@@ -1298,7 +1297,7 @@ export default function App() {
                           <input
                             type="number"
                             step="0.1"
-                            className="w-20 text-right px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                            className="w-20 text-right px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
                             value={emp.extraX}
                             onChange={(e) =>
                               setEmpleados((prev) =>
@@ -1353,7 +1352,7 @@ function MetricCard({
       <div className="relative rounded-2xl p-[1px]">
         <div className="rounded-2xl bg-white/80 dark:bg-[#0b1020]/70 backdrop-blur ring-1 ring-black/5 dark:ring-white/10 p-4">
           <p className="text-xs opacity-80">{title}</p>
-          <p className="mt-1 text-2xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-slate-900 via-slate-700 to-slate-900 dark:from-white dark:via-white/90 dark:to-white">
+          <p className="mt-1 text-2xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-petro-ink to-petro-charcoal dark:from-white dark:to-white/90">
             {value}
           </p>
         </div>
