@@ -76,6 +76,18 @@ function useTheme() {
   return { dark, setDark };
 }
 
+/* ───── Tipos Empleados ───────────────────────────────────────── */
+type Estatus = "Activo" | "Baja";
+type Employee = {
+  id: string;
+  nombre: string;
+  puesto: string;
+  area: string;
+  estatus: Estatus;
+  tarifa: number;   // $/h primaria
+  extraX: number;   // multiplicador hora extra (ej. 1.5)
+};
+
 /* ───── App ────────────────────────────────────────────────────── */
 export default function App() {
   const { dark, setDark } = useTheme();
@@ -394,6 +406,30 @@ export default function App() {
     URL.revokeObjectURL(url);
   }
 
+  /* ───── Empleados (estado + persistencia) ────────────────────── */
+  const [empleados, setEmpleados] = useState<Employee[]>(() => {
+    try {
+      const saved = localStorage.getItem("empleados_v1");
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    // Seed mínimo
+    return [
+      { id: crypto.randomUUID(), nombre: "SERGIO",  puesto: "Operador",       area: "Planta",  estatus: "Activo", tarifa: 60, extraX: 1.5 },
+      { id: crypto.randomUUID(), nombre: "VALERIA", puesto: "Administrativo", area: "Oficina", estatus: "Activo", tarifa: 45, extraX: 2   },
+    ];
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("empleados_v1", JSON.stringify(empleados));
+    } catch {}
+  }, [empleados]);
+
+  const byNombre = useMemo(() => {
+    const m = new Map<string, Employee>();
+    for (const e of empleados) m.set(e.nombre.trim().toUpperCase(), e);
+    return m;
+  }, [empleados]);
+
   /* ───── Check-in ─────────────────────────────────────────────── */
   type DayPair = { in: string; out: string };
   type CheckRow = {
@@ -463,18 +499,37 @@ export default function App() {
   function pushCheckinToDraft() {
     const mapped = checkRows
       .filter((r) => r.nombre.trim() !== "")
-      .map((r) => ({
-        nombre: r.nombre,
-        total_horas_primarias: Number(calcHoursForRow(r).toFixed(2)),
-        horas_extras: 0,
-        costo_hora_primaria: 0,
-        costo_hora_extra: 0,
-        bono_semanal: 0,
-        descuentos: 0,
-        pendiente_descuento: 0,
-        pago_semanal_base: 0,
-        extra: "",
-      })) as Draft[];
+      .map((r) => {
+        const hours = Number(calcHoursForRow(r).toFixed(2));
+
+        // Busca empleado para tarifas; si no, deja en 0
+        const emp = byNombre.get(r.nombre.trim().toUpperCase());
+        const base = emp?.tarifa ?? 0;
+        const mult = emp?.extraX ?? extraMultiplier;
+        const costoExtra = autoExtra ? Math.round(base * mult * 100) / 100 : 0;
+
+        // Si está activo el auto de horas extra por umbral
+        let prim = hours;
+        let ext = 0;
+        if (autoHorasExtra) {
+          ext = Math.max(0, hours - extrasThreshold);
+          prim = Math.min(hours, extrasThreshold);
+        }
+
+        return {
+          nombre: r.nombre,
+          total_horas_primarias: prim,
+          horas_extras: ext,
+          costo_hora_primaria: base,
+          costo_hora_extra: costoExtra,
+          bono_semanal: 0,
+          descuentos: 0,
+          pendiente_descuento: 0,
+          pago_semanal_base: 0,
+          extra: "",
+        };
+      }) as Draft[];
+
     if (!mapped.length) {
       alert("Captura al menos un empleado con horario.");
       return;
@@ -595,7 +650,7 @@ export default function App() {
                 <div className="overflow-x-auto">
                   <table className="w-full table-fixed border-collapse text-[13px]">
                     <colgroup>
-                      <col className="w-[180px]" />
+                      <col className="w-[220px]" />
                       <col />
                       <col />
                       <col />
@@ -618,15 +673,24 @@ export default function App() {
                     <tbody>
                       {checkRows.map((r, idx) => {
                         const total = calcHoursForRow(r);
+                        const nombres = empleados.map((e) => e.nombre);
                         return (
                           <tr key={idx} className={idx % 2 ? "bg-white/60 dark:bg-white/5" : "bg-white/30 dark:bg-transparent"}>
                             <td className="px-3 py-2">
-                              <input
-                                className="w-full min-w-0 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
-                                value={r.nombre}
-                                onChange={(e) => updateCheckName(idx, e.target.value)}
-                                placeholder={`Empleado ${idx + 1}`}
-                              />
+                              <div className="flex gap-2">
+                                <input
+                                  list={`empleados-list-${idx}`}
+                                  className="w-full min-w-0 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                                  value={r.nombre}
+                                  onChange={(e) => updateCheckName(idx, e.target.value)}
+                                  placeholder={`Empleado ${idx + 1}`}
+                                />
+                                <datalist id={`empleados-list-${idx}`}>
+                                  {nombres.map((n) => (
+                                    <option key={n} value={n} />
+                                  ))}
+                                </datalist>
+                              </div>
                             </td>
                             {(["LUN","MAR","MIE","JUE","VIE","SAB"] as (keyof CheckRow)[]).map((day) => (
                               <td key={String(day)} className="px-2 py-2">
@@ -713,31 +777,7 @@ export default function App() {
                       </option>
                     ))}
                   </select>
-
-                  <select
-                    className="px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
-                    value={periodo}
-                    onChange={(e) => {
-                      setPeriodo(e.target.value);
-                      setPage(0);
-                    }}
-                    disabled={!periodoCol}
-                    title={
-                      periodoCol
-                        ? `Usando columna: ${periodoCol}`
-                        : "No se detectó columna de periodo"
-                    }
-                  >
-                    <option value="">
-                      {periodoCol ? "Todos los periodos" : "Sin columna de periodo"}
-                    </option>
-                    {periodosUnicos.map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
-                  </select>
-
+                  
                   <button
                     className="ml-auto px-4 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-fuchsia-600 text-white shadow hover:shadow-lg active:scale-[0.98] transition"
                     onClick={() => {
@@ -866,6 +906,7 @@ export default function App() {
                                   value={r.nombre}
                                   onChange={(e) => updateDraft(idx, "nombre", e.target.value)}
                                   placeholder="Empleado"
+                                  list="empleados-nombres"
                                 />
                               </td>
                               <td className="px-3 py-2 text-right">
@@ -893,7 +934,6 @@ export default function App() {
                                   value={r.costo_hora_primaria}
                                   onChange={(e) => updateDraft(idx, "costo_hora_primaria", Number(e.target.value))}
                                   onBlur={(e) => {
-                                    // Refuerzo del autocalculo al salir del campo
                                     if (autoExtra) {
                                       const base = Number(e.target.value) || 0;
                                       const calc = Math.round(base * extraMultiplier * 100) / 100;
@@ -964,6 +1004,12 @@ export default function App() {
                         })}
                       </tbody>
                     </table>
+                    {/* datalist de nombres para el editor también */}
+                    <datalist id="empleados-nombres">
+                      {empleados.map((e) => (
+                        <option key={e.id} value={e.nombre} />
+                      ))}
+                    </datalist>
                   </div>
 
                   <div className="flex items-center justify-between text-xs opacity-80">
@@ -1116,65 +1162,173 @@ export default function App() {
           )}
 
           {/* ─────────────── EMPLEADOS ─────────────── */}
-
-          {/* EMPLEADOS */}
           {section === "empleados" && (
-  <div className="space-y-4">
-    {/* Barra de acciones */}
-    <div className="flex gap-2">
-      <button className="px-3 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-fuchsia-500 text-white text-sm shadow">
-        + Nuevo empleado
-      </button>
-      <button className="px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border text-sm">
-        Importar CSV
-      </button>
-      <button className="px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border text-sm">
-        Exportar CSV
-      </button>
-    </div>
-
-    {/* Tabla empleados */}
-    <div className="overflow-auto rounded-2xl shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
-      <table className="w-full text-sm min-w-[900px]">
-        <thead className="sticky top-0">
-          <tr className="bg-gradient-to-r from-sky-600 to-fuchsia-600 text-white">
-            <th className="px-3 py-2 text-left">Nombre</th>
-            <th className="px-3 py-2">Puesto</th>
-            <th className="px-3 py-2">Área</th>
-            <th className="px-3 py-2">Estatus</th>
-            <th className="px-3 py-2">$/h</th>
-            <th className="px-3 py-2">Extra×</th>
-            <th className="px-3 py-2">Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          {/* De momento datos de ejemplo */}
-          {[
-            { nombre: "SERGIO", puesto: "Operador", area: "Planta", estatus: "Activo", tarifa: 60, extra: 1.5 },
-            { nombre: "VALERIA", puesto: "Administrativo", area: "Oficina", estatus: "Activo", tarifa: 45, extra: 2 },
-          ].map((emp, idx) => (
-            <tr
-              key={idx}
-              className={idx % 2 ? "bg-white/70 dark:bg-white/5" : "bg-white/40 dark:bg-transparent"}
-            >
-              <td className="px-3 py-2">{emp.nombre}</td>
-              <td className="px-3 py-2 text-center">{emp.puesto}</td>
-              <td className="px-3 py-2 text-center">{emp.area}</td>
-              <td className="px-3 py-2 text-center">{emp.estatus}</td>
-              <td className="px-3 py-2 text-right">{emp.tarifa}</td>
-              <td className="px-3 py-2 text-right">{emp.extra}×</td>
-              <td className="px-3 py-2 text-center">
-                <button className="px-2 py-1 rounded-lg bg-sky-500 text-white text-xs">
-                  Editar
+            <div className="space-y-4">
+              {/* Barra de acciones */}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="px-3 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-fuchsia-500 text-white text-sm shadow"
+                  onClick={() =>
+                    setEmpleados((prev) => [
+                      ...prev,
+                      {
+                        id: crypto.randomUUID(),
+                        nombre: "",
+                        puesto: "Operador",
+                        area: "Planta",
+                        estatus: "Activo",
+                        tarifa: 0,
+                        extraX: 1.5,
+                      },
+                    ])
+                  }
+                >
+                  + Nuevo empleado
                 </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  </div>
-)}
+                <button
+                  className="px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border text-sm"
+                  onClick={() => {
+                    const csv = toCSV(
+                      empleados.map((e) => ({
+                        id: e.id,
+                        nombre: e.nombre,
+                        puesto: e.puesto,
+                        area: e.area,
+                        estatus: e.estatus,
+                        tarifa: e.tarifa,
+                        extraX: e.extraX,
+                      }))
+                    );
+                    const blob = new Blob([csv], { type: "text/csv" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = "empleados.csv";
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  Exportar CSV
+                </button>
+              </div>
+
+              {/* Tabla empleados */}
+              <div className="overflow-auto rounded-2xl shadow-xl ring-1 ring-black/5 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
+                <table className="w-full text-sm min-w-[900px]">
+                  <thead className="sticky top-0">
+                    <tr className="bg-gradient-to-r from-sky-600 to-fuchsia-600 text-white">
+                      <th className="px-3 py-2 text-left">Nombre</th>
+                      <th className="px-3 py-2">Puesto</th>
+                      <th className="px-3 py-2">Área</th>
+                      <th className="px-3 py-2">Estatus</th>
+                      <th className="px-3 py-2">$/h</th>
+                      <th className="px-3 py-2">Extra×</th>
+                      <th className="px-3 py-2">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {empleados.map((emp, idx) => (
+                      <tr
+                        key={emp.id}
+                        className={idx % 2 ? "bg-white/70 dark:bg-white/5" : "bg-white/40 dark:bg-transparent"}
+                      >
+                        <td className="px-3 py-2">
+                          <input
+                            className="w-full px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                            value={emp.nombre}
+                            onChange={(e) =>
+                              setEmpleados((prev) =>
+                                prev.map((x) => (x.id === emp.id ? { ...x, nombre: e.target.value } : x))
+                              )
+                            }
+                            placeholder="Nombre"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <input
+                            className="w-36 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10 text-center"
+                            value={emp.puesto}
+                            onChange={(e) =>
+                              setEmpleados((prev) =>
+                                prev.map((x) => (x.id === emp.id ? { ...x, puesto: e.target.value } : x))
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <input
+                            className="w-28 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10 text-center"
+                            value={emp.area}
+                            onChange={(e) =>
+                              setEmpleados((prev) =>
+                                prev.map((x) => (x.id === emp.id ? { ...x, area: e.target.value } : x))
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <select
+                            className="px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                            value={emp.estatus}
+                            onChange={(e) =>
+                              setEmpleados((prev) =>
+                                prev.map((x) =>
+                                  x.id === emp.id ? { ...x, estatus: e.target.value as Estatus } : x
+                                )
+                              )
+                            }
+                          >
+                            <option value="Activo">Activo</option>
+                            <option value="Baja">Baja</option>
+                          </select>
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <input
+                            type="number"
+                            className="w-24 text-right px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                            value={emp.tarifa}
+                            onChange={(e) =>
+                              setEmpleados((prev) =>
+                                prev.map((x) => (x.id === emp.id ? { ...x, tarifa: Number(e.target.value) } : x))
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <input
+                            type="number"
+                            step="0.1"
+                            className="w-20 text-right px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-black/10 dark:border-white/10"
+                            value={emp.extraX}
+                            onChange={(e) =>
+                              setEmpleados((prev) =>
+                                prev.map((x) => (x.id === emp.id ? { ...x, extraX: Number(e.target.value) } : x))
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <button
+                            className="px-2 py-1 rounded-lg bg-rose-500/90 hover:bg-rose-500 text-white text-xs"
+                            onClick={() => setEmpleados((prev) => prev.filter((x) => x.id !== emp.id))}
+                          >
+                            Eliminar
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {empleados.length === 0 && (
+                      <tr>
+                        <td colSpan={7} className="px-3 py-6 text-center opacity-70">
+                          Sin empleados. Agrega uno con “+ Nuevo empleado”.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </main>
       </div>
     </div>
