@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Row = Record<string, any>;
-type Section = "nominas" | "empleados" | "checkin";
+type Section = "nominas" | "empleados" | "checkin" | "billetes";
 
 /* ───── Utilidades ─────────────────────────────────────────────── */
 function toCSV(rows: Row[]): string {
@@ -567,6 +567,111 @@ export default function App() {
     setCheckRows(rows);
   }
 
+  /* ───── Billetes (estado + persistencia) ─────────────────────── */
+  type Den = 1000 | 500 | 200 | 100 | 50;
+  type BilletesEntry = {
+    id: string;
+    fechaISO: string;     // registro
+    nota: string;
+    desglose: Record<Den, number>; // conteo por denominación
+    total: number;
+  };
+
+  const DENOMS: Den[] = [1000, 500, 200, 100, 50];
+
+  const [billetes, setBilletes] = useState<BilletesEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem("billetes_v1");
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("billetes_v1", JSON.stringify(billetes));
+    } catch {}
+  }, [billetes]);
+
+  // Estado del formulario de billetes
+  const [counts, setCounts] = useState<Record<Den, number>>({
+    1000: 0,
+    500: 0,
+    200: 0,
+    100: 0,
+    50: 0,
+  });
+  const [notaBilletes, setNotaBilletes] = useState("");
+
+  const totalBilletes = useMemo(
+    () => DENOMS.reduce((acc, d) => acc + d * (counts[d] || 0), 0),
+    [counts]
+  );
+
+  function setCount(den: Den, value: number) {
+    setCounts((c) => ({ ...c, [den]: Math.max(0, Math.floor(value || 0)) }));
+  }
+
+  // Preset solicitado: 10,000 con 5×1000, 5×500 y resto en 100
+  function presetDiezMil() {
+    const fives1000 = 5 * 1000; // 5000
+    const fives500 = 5 * 500;   // 2500
+    const base = fives1000 + fives500; // 7500
+    const restante = 10000 - base;     // 2500
+    const de100 = Math.max(0, Math.floor(restante / 100)); // 25
+    setCounts({
+      1000: 5,
+      500: 5,
+      200: 0,
+      100: de100, // 25
+      50: 0,
+    });
+    setNotaBilletes("Entrega estándar 10k (5×1000, 5×500, resto en 100).");
+  }
+
+  function limpiarBilletes() {
+    setCounts({ 1000: 0, 500: 0, 200: 0, 100: 0, 50: 0 });
+    setNotaBilletes("");
+  }
+
+  function registrarEntrega() {
+    if (totalBilletes <= 0) {
+      alert("Captura al menos un billete.");
+      return;
+    }
+    const entry: BilletesEntry = {
+      id: crypto.randomUUID(),
+      fechaISO: new Date().toISOString(),
+      nota: notaBilletes.trim(),
+      desglose: { ...counts },
+      total: totalBilletes,
+    };
+    setBilletes((prev) => [entry, ...prev]);
+    limpiarBilletes();
+  }
+
+  function exportarBilletesCSV() {
+    if (!billetes.length) return;
+    const rows = billetes.map((b) => ({
+      id: b.id,
+      fecha: b.fechaISO,
+      nota: b.nota,
+      "1000": b.desglose[1000] || 0,
+      "500": b.desglose[500] || 0,
+      "200": b.desglose[200] || 0,
+      "100": b.desglose[100] || 0,
+      "50": b.desglose[50] || 0,
+      total: b.total,
+    }));
+    const csv = toCSV(rows);
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "billetes.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   /* ────────────────────────────────────────────────────────────── UI  */
   return (
     <div className="min-h-screen bg-gradient-to-br from-petro-off to-petro-paper dark:from-petro-ink dark:to-petro-charcoal text-petro-ink dark:text-petro-paper transition-colors">
@@ -596,7 +701,7 @@ export default function App() {
           <div className="rounded-2xl p-3 bg-gradient-to-b from-petro-redDark to-petro-red text-white shadow-xl ring-1 ring-white/30">
             <div className="px-2 py-2 text-sm/relaxed opacity-90">Navegación</div>
             <nav className="space-y-2 mt-1">
-              {(["nominas", "checkin", "empleados"] as Section[]).map((s) => (
+              {(["nominas", "checkin", "empleados", "billetes"] as Section[]).map((s) => (
                 <button
                   key={s}
                   onClick={() => setSection(s)}
@@ -604,7 +709,13 @@ export default function App() {
                     section === s ? "ring-2 ring-white/60" : ""
                   }`}
                 >
-                  {s === "nominas" ? "Nóminas" : s === "checkin" ? "Check-in" : s[0].toUpperCase() + s.slice(1)}
+                  {s === "nominas"
+                    ? "Nóminas"
+                    : s === "checkin"
+                    ? "Check-in"
+                    : s === "empleados"
+                    ? "Empleados"
+                    : "Billetes"}
                 </button>
               ))}
             </nav>
@@ -634,7 +745,7 @@ export default function App() {
                     className="px-3 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-sm"
                     onClick={loadUserTemplate}
                   >
-                    Cargar plantilla (14 filas)
+                    Cargar plantilla (lo que me mandaste)
                   </button>
                   <button
                     className="ml-auto px-3 py-2 rounded-xl bg-gradient-to-r from-petro-redDark to-petro-red text-white text-sm shadow"
@@ -778,6 +889,30 @@ export default function App() {
                     ))}
                   </select>
 
+                  <select
+                    className="px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
+                    value={periodo}
+                    onChange={(e) => {
+                      setPeriodo(e.target.value);
+                      setPage(0);
+                    }}
+                    disabled={!periodoCol}
+                    title={
+                      periodoCol
+                        ? `Usando columna: ${periodoCol}`
+                        : "No se detectó columna de periodo"
+                    }
+                  >
+                    <option value="">
+                      {periodoCol ? "Todos los periodos" : "Sin columna de periodo"}
+                    </option>
+                    {periodosUnicos.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+
                   <button
                     className="ml-auto px-4 py-2 rounded-xl bg-gradient-to-r from-petro-red to-petro-redDark text-white shadow hover:shadow-lg active:scale-[0.98] transition"
                     onClick={() => {
@@ -890,11 +1025,6 @@ export default function App() {
                       </thead>
                       <tbody>
                         {draftRows.map((r, idx) => {
-                          const pagoPrim = r.total_horas_primarias * r.costo_hora_primaria;
-                          const pagoExt = r.horas_extras * r.costo_hora_extra;
-                          const calc = pagoPrim + pagoExt;
-                          const total = calc - (r.descuentos || 0);
-                          const total2 = total + (r.bono_semanal || 0);
                           return (
                             <tr
                               key={idx}
@@ -1325,6 +1455,141 @@ export default function App() {
                     )}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {/* ─────────────── BILLETES ─────────────── */}
+          {section === "billetes" && (
+            <div className="space-y-4">
+              {/* Acciones */}
+              <div className="rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/70 dark:bg-white/5 backdrop-blur">
+                <div className="flex flex-wrap gap-2 items-center">
+                  <button
+                    className="px-3 py-2 rounded-xl bg-gradient-to-r from-petro-red to-petro-redDark text-white text-sm shadow"
+                    onClick={presetDiezMil}
+                  >
+                    Preset 10,000 (5×1000, 5×500, resto 100)
+                  </button>
+                  <button
+                    className="px-3 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-sm"
+                    onClick={limpiarBilletes}
+                  >
+                    Limpiar
+                  </button>
+                  <button
+                    className="ml-auto px-3 py-2 rounded-xl bg-gradient-to-r from-petro-redDark to-petro-red text-white text-sm shadow"
+                    onClick={registrarEntrega}
+                  >
+                    Registrar entrega
+                  </button>
+                </div>
+              </div>
+
+              {/* Formulario conteo */}
+              <div className="rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
+                <h3 className="font-semibold text-petro-redDark mb-3">Conteo de billetes</h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                  {DENOMS.map((d) => (
+                    <div
+                      key={d}
+                      className="rounded-xl p-3 bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
+                    >
+                      <div className="text-xs opacity-70 mb-1">Denominación</div>
+                      <div className="text-lg font-semibold">${d}</div>
+                      <div className="mt-2 text-xs opacity-70">Cantidad</div>
+                      <input
+                        type="number"
+                        className="mt-1 w-full px-2 py-1 rounded-lg bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-right"
+                        value={counts[d]}
+                        onChange={(e) => setCount(d, Number(e.target.value))}
+                        min={0}
+                      />
+                      <div className="mt-2 text-right text-sm">
+                        Subtotal: <b>${fmt(d * (counts[d] || 0))}</b>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-4 flex flex-col md:flex-row gap-3 items-start md:items-center">
+                  <div className="text-base">
+                    Total a entregar:{" "}
+                    <b className="text-petro-redDark">${fmt(totalBilletes)}</b>
+                  </div>
+                  <input
+                    className="md:ml-auto flex-1 px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
+                    placeholder="Nota (quién recibió, sucursal, etc.)"
+                    value={notaBilletes}
+                    onChange={(e) => setNotaBilletes(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* Historial */}
+              <div className="rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
+                <div className="flex items-center gap-2 mb-3">
+                  <h3 className="font-semibold">Historial de entregas</h3>
+                  <button
+                    className="ml-auto px-3 py-1.5 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 hover:bg-white"
+                    onClick={exportarBilletesCSV}
+                    disabled={!billetes.length}
+                  >
+                    Exportar CSV
+                  </button>
+                </div>
+
+                <div className="overflow-auto rounded-xl border border-petro-line/60 dark:border-white/10">
+                  <table className="w-full text-sm min-w-[860px]">
+                    <thead>
+                      <tr className="bg-gradient-to-r from-petro-red to-petro-redDark text-white">
+                        <th className="px-3 py-2 text-left">Fecha</th>
+                        <th className="px-3 py-2 text-right">1000</th>
+                        <th className="px-3 py-2 text-right">500</th>
+                        <th className="px-3 py-2 text-right">200</th>
+                        <th className="px-3 py-2 text-right">100</th>
+                        <th className="px-3 py-2 text-right">50</th>
+                        <th className="px-3 py-2 text-right">Total</th>
+                        <th className="px-3 py-2">Nota</th>
+                        <th className="px-3 py-2"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {billetes.length === 0 ? (
+                        <tr>
+                          <td colSpan={9} className="px-3 py-6 text-center opacity-70">
+                            Sin registros. Usa “Preset 10,000” o captura el conteo y pulsa “Registrar entrega”.
+                          </td>
+                        </tr>
+                      ) : (
+                        billetes.map((b, idx) => (
+                          <tr key={b.id} className={idx % 2 ? "bg-white/60 dark:bg-white/5" : "bg-white/30 dark:bg-transparent"}>
+                            <td className="px-3 py-2">
+                              {new Date(b.fechaISO).toLocaleString()}
+                            </td>
+                            <td className="px-3 py-2 text-right">{b.desglose[1000] || 0}</td>
+                            <td className="px-3 py-2 text-right">{b.desglose[500] || 0}</td>
+                            <td className="px-3 py-2 text-right">{b.desglose[200] || 0}</td>
+                            <td className="px-3 py-2 text-right">{b.desglose[100] || 0}</td>
+                            <td className="px-3 py-2 text-right">{b.desglose[50] || 0}</td>
+                            <td className="px-3 py-2 text-right font-mono">${fmt(b.total)}</td>
+                            <td className="px-3 py-2">{b.nota || "—"}</td>
+                            <td className="px-3 py-2 text-right">
+                              <button
+                                className="px-2 py-1 rounded-lg bg-rose-500/90 hover:bg-rose-500 text-white text-xs"
+                                onClick={() =>
+                                  setBilletes((prev) => prev.filter((x) => x.id !== b.id))
+                                }
+                              >
+                                Eliminar
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
