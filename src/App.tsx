@@ -78,6 +78,8 @@ function useTheme() {
 
 /* ───── Tipos Empleados ───────────────────────────────────────── */
 type Estatus = "Activo" | "Baja";
+type TipoPago = "Por horas" | "Semanal fijo";
+
 type Employee = {
   id: string;
   nombre: string;
@@ -86,6 +88,8 @@ type Employee = {
   estatus: Estatus;
   tarifa: number;   // $/h primaria
   extraX: number;   // multiplicador hora extra (ej. 1.5)
+  tipoPago: TipoPago;
+  pagoSemanal: number;
 };
 
 /* ───── App ────────────────────────────────────────────────────── */
@@ -408,15 +412,51 @@ export default function App() {
 
   /* ───── Empleados (estado + persistencia) ────────────────────── */
   const [empleados, setEmpleados] = useState<Employee[]>(() => {
+    const withDefaults = (list: any[]): Employee[] =>
+      list.map((emp) => ({
+        id: crypto.randomUUID(),
+        nombre: "",
+        puesto: "",
+        area: "",
+        estatus: "Activo" as Estatus,
+        tarifa: 0,
+        extraX: 1.5,
+        tipoPago: "Por horas" as TipoPago,
+        pagoSemanal: 0,
+        ...emp,
+        tipoPago: (emp?.tipoPago ?? "Por horas") as TipoPago,
+        pagoSemanal: Number(emp?.pagoSemanal ?? 0),
+      }));
+
     try {
       const saved = localStorage.getItem("empleados_v1");
-      if (saved) return JSON.parse(saved);
+      if (saved) return withDefaults(JSON.parse(saved));
     } catch {}
     // Seed mínimo
-    return [
-      { id: crypto.randomUUID(), nombre: "SERGIO",  puesto: "Operador",       area: "Planta",  estatus: "Activo", tarifa: 60, extraX: 1.5 },
-      { id: crypto.randomUUID(), nombre: "VALERIA", puesto: "Administrativo", area: "Oficina", estatus: "Activo", tarifa: 45, extraX: 2   },
-    ];
+    return withDefaults([
+      {
+        id: crypto.randomUUID(),
+        nombre: "SERGIO",
+        puesto: "Operador",
+        area: "Planta",
+        estatus: "Activo",
+        tarifa: 60,
+        extraX: 1.5,
+        tipoPago: "Por horas",
+        pagoSemanal: 0,
+      },
+      {
+        id: crypto.randomUUID(),
+        nombre: "VALERIA",
+        puesto: "Administrativo",
+        area: "Oficina",
+        estatus: "Activo",
+        tarifa: 45,
+        extraX: 2,
+        tipoPago: "Por horas",
+        pagoSemanal: 0,
+      },
+    ]);
   });
   /* ───── Préstamos ─────────────────────────────────────────────── */
   type Prestamo = {
@@ -541,7 +581,10 @@ export default function App() {
 
         // Busca empleado para tarifas; si no, deja en 0
         const emp = byNombre.get(r.nombre.trim().toUpperCase());
-        const base = emp?.tarifa ?? 0;
+        const base =
+          emp?.tipoPago === "Semanal fijo"
+            ? (emp?.pagoSemanal ?? 0) / 48
+            : emp?.tarifa ?? 0;
         const mult = emp?.extraX ?? extraMultiplier;
         const costoExtra = autoExtra ? Math.round(base * mult * 100) / 100 : 0;
 
@@ -1329,7 +1372,7 @@ export default function App() {
 
           {/* ─────────────── EMPLEADOS ─────────────── */}
           {section === "empleados" && (
-            <div className="space-y-4">
+            <div className="space-y-4 -ml-6 md:-ml-16">
               {/* Barra de acciones */}
               <div className="flex flex-wrap gap-2">
                 <button
@@ -1345,6 +1388,8 @@ export default function App() {
                         estatus: "Activo",
                         tarifa: 0,
                         extraX: 1.5,
+                        tipoPago: "Por horas",
+                        pagoSemanal: 0,
                       },
                     ])
                   }
@@ -1363,6 +1408,8 @@ export default function App() {
                         estatus: e.estatus,
                         tarifa: e.tarifa,
                         extraX: e.extraX,
+                        tipoPago: e.tipoPago,
+                        pagoSemanal: e.pagoSemanal,
                       }))
                     );
                     const blob = new Blob([csv], { type: "text/csv" });
@@ -1378,221 +1425,225 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Tabla empleados con scroll horizontal y clipping correcto */}
-              <div className="rounded-2xl shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
-                {/* capa scroller: hace el scroll y respeta el borde redondeado del padre */}
-                <div className="overflow-x-auto overflow-y-hidden rounded-2xl scrollbar-thin scrollbar-thumb-petro-red/50 scrollbar-track-transparent hover:scrollbar-thumb-petro-red/80 overscroll-x-contain">
-                  {/* min width para evitar que salte el layout; padding derecha para que no muerda el borde */}
-                  <div className="min-w-[1100px] pr-2">
-                    <table className="w-full text-sm">
-                      <thead className="sticky top-0">
-                        <tr className="bg-gradient-to-r from-petro-red to-petro-redDark text-white">
-                          <th className="px-3 py-2 text-left">Nombre</th>
-                          <th className="px-3 py-2">Tipo pago</th>
-                          <th className="px-3 py-2 text-right">Pago semanal</th>
-                          <th className="px-3 py-2">Puesto</th>
-                          <th className="px-3 py-2">Área</th>
-                          <th className="px-3 py-2">Estatus</th>
-                          <th className="px-3 py-2 text-right">$/h</th>
-                          <th className="px-3 py-2 text-right">Extra×</th>
-                          <th className="px-3 py-2">Acciones</th>
-                        </tr>
-                      </thead>
-
-                      <tbody>
-                        {empleados.map((emp, idx) => (
-                          <tr
-                            key={emp.id}
-                            className={idx % 2 ? "bg-white/70 dark:bg-white/5" : "bg-white/40 dark:bg-transparent"}
-                          >
-                            <td className="px-3 py-2">
-                              <input
-                                className="w-full px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                                value={emp.nombre}
-                                onChange={(e) =>
-                                  setEmpleados((prev) =>
-                                    prev.map((x) => (x.id === emp.id ? { ...x, nombre: e.target.value } : x))
-                                  )
-                                }
-                                placeholder="Nombre"
-                              />
-                            </td>
-                            <td className="px-3 py-2 text-center">
-                              <select
-                                className="px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                                value={emp.tipoPago ?? "horas"}
-                                onChange={(e) =>
-                                  setEmpleados((prev) =>
-                                    prev.map((x) =>
-                                      x.id === emp.id ? { ...x, tipoPago: e.target.value } : x
-                                    )
-                                  )
-                                }
-                              >
-                                <option value="horas">Por horas</option>
-                                <option value="semanal">Semanal fijo</option>
-                              </select>
-                            </td>
-
-                            <td className="px-3 py-2 text-right">
-                              <input
-                                type="number"
-                                className="w-24 text-right px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                                value={emp.pagoSemanal ?? 0}
-                                onChange={(e) =>
-                                  setEmpleados((prev) =>
-                                    prev.map((x) =>
-                                      x.id === emp.id ? { ...x, pagoSemanal: Number(e.target.value) } : x
-                                    )
-                                  )
-                                }
-                              />
-                            </td>
-                            <td className="px-3 py-2 text-center">
-                              <input
-                                className="w-36 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-center"
-                                value={emp.puesto}
-                                onChange={(e) =>
-                                  setEmpleados((prev) =>
-                                    prev.map((x) => (x.id === emp.id ? { ...x, puesto: e.target.value } : x))
-                                  )
-                                }
-                              />
-                            </td>
-                            <td className="px-3 py-2 text-center">
-                              <input
-                                className="w-28 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-center"
-                                value={emp.area}
-                                onChange={(e) =>
-                                  setEmpleados((prev) =>
-                                    prev.map((x) => (x.id === emp.id ? { ...x, area: e.target.value } : x))
-                                  )
-                                }
-                              />
-                            </td>
-                            <td className="px-3 py-2 text-center">
-                              <select
-                                className="px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                                value={emp.estatus}
-                                onChange={(e) =>
-                                  setEmpleados((prev) =>
-                                    prev.map((x) =>
-                                      x.id === emp.id ? { ...x, estatus: e.target.value as Estatus } : x
-                                    )
-                                  )
-                                }
-                              >
-                                <option value="Activo">Activo</option>
-                                <option value="Baja">Baja</option>
-                              </select>
-                            </td>
-                            <td className="px-3 py-2 text-right">
-                              <input
-                                type="number"
-                                className="w-24 text-right px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                                value={emp.tarifa}
-                                onChange={(e) =>
-                                  setEmpleados((prev) =>
-                                    prev.map((x) => (x.id === emp.id ? { ...x, tarifa: Number(e.target.value) } : x))
-                                  )
-                                }
-                              />
-                            </td>
-                            <td className="px-3 py-2 text-right">
-                              <input
-                                type="number"
-                                step="0.1"
-                                className="w-20 text-right px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                                value={emp.extraX}
-                                onChange={(e) =>
-                                  setEmpleados((prev) =>
-                                    prev.map((x) => (x.id === emp.id ? { ...x, extraX: Number(e.target.value) } : x))
-                                  )
-                                }
-                              />
-                            </td>
-                            <td className="px-3 py-2 text-center whitespace-nowrap">
-                              <button
-                                className="px-2 py-1 rounded-lg bg-amber-500/90 hover:bg-amber-500 text-white text-xs mr-1"
-                                onClick={() => {
-                                  const monto = Number(prompt("Monto del préstamo:", "0"));
-                                  if (!monto || isNaN(monto)) return;
-                                  const descripcion = prompt("Descripción o motivo:", "") || "";
-                                  agregarPrestamo(emp.id, monto, descripcion);
-                                }}
-                              >
-                                Préstamo
-                              </button>
-
-                              <button
-                                className="px-2 py-1 rounded-lg bg-rose-500/90 hover:bg-rose-500 text-white text-xs"
-                                onClick={() => setEmpleados((prev) => prev.filter((x) => x.id !== emp.id))}
-                              >
-                                Eliminar
-                              </button>
-                            </td>
+              <div className="space-y-6">
+                {/* Tabla empleados con scroll horizontal y clipping correcto */}
+                <div className="overflow-auto rounded-2xl shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
+                  {/* capa scroller: hace el scroll y respeta el borde redondeado del padre */}
+                  <div className="overflow-x-auto overflow-y-hidden rounded-2xl scrollbar-thin scrollbar-thumb-petro-red/50 scrollbar-track-transparent hover:scrollbar-thumb-petro-red/80 overscroll-x-contain">
+                    {/* min width para evitar que salte el layout; padding derecha para que no muerda el borde */}
+                    <div className="min-w-[1100px] pr-2">
+                      <table className="w-full text-sm">
+                        <thead className="sticky top-0">
+                          <tr className="bg-gradient-to-r from-petro-red to-petro-redDark text-white">
+                            <th className="px-3 py-2 text-left">Nombre</th>
+                            <th className="px-3 py-2">Tipo pago</th>
+                            <th className="px-3 py-2 text-right">Pago semanal</th>
+                            <th className="px-3 py-2">Puesto</th>
+                            <th className="px-3 py-2">Área</th>
+                            <th className="px-3 py-2">Estatus</th>
+                            <th className="px-3 py-2 text-right">$/h</th>
+                            <th className="px-3 py-2 text-right">Extra×</th>
+                            <th className="px-3 py-2">Acciones</th>
                           </tr>
-                        ))}
+                        </thead>
 
-                        {empleados.length === 0 && (
-                          <tr>
-                            <td colSpan={9} className="px-3 py-6 text-center opacity-70">
-                              Sin empleados. Agrega uno con “+ Nuevo empleado”.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
+                        <tbody>
+                          {empleados.map((emp, idx) => (
+                            <tr
+                              key={emp.id}
+                              className={idx % 2 ? "bg-white/70 dark:bg-white/5" : "bg-white/40 dark:bg-transparent"}
+                            >
+                              <td className="px-3 py-2">
+                                <input
+                                  className="w-full px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
+                                  value={emp.nombre}
+                                  onChange={(e) =>
+                                    setEmpleados((prev) =>
+                                      prev.map((x) => (x.id === emp.id ? { ...x, nombre: e.target.value } : x))
+                                    )
+                                  }
+                                  placeholder="Nombre"
+                                />
+                              </td>
+                              {/* Tipo de pago */}
+                              <td className="px-3 py-2 text-center">
+                                <select
+                                  className="px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
+                                  value={emp.tipoPago}
+                                  onChange={(e) =>
+                                    setEmpleados((prev) =>
+                                      prev.map((x) =>
+                                        x.id === emp.id ? { ...x, tipoPago: e.target.value as TipoPago } : x
+                                      )
+                                    )
+                                  }
+                                >
+                                  <option value="Por horas">Por horas</option>
+                                  <option value="Semanal fijo">Semanal fijo</option>
+                                </select>
+                              </td>
 
-              {/* HISTORIAL DE PRÉSTAMOS */}
-              <div className="mt-6 rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
-                <h3 className="font-semibold mb-3 text-petro-redDark">Historial de préstamos</h3>
-                <div className="overflow-auto rounded-xl border border-petro-line/60 dark:border-white/10">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-gradient-to-r from-petro-red to-petro-redDark text-white">
-                        <th className="px-3 py-2 text-left">Empleado</th>
-                        <th className="px-3 py-2 text-right">Monto</th>
-                        <th className="px-3 py-2">Descripción</th>
-                        <th className="px-3 py-2">Fecha</th>
-                        <th className="px-3 py-2"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {prestamos.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="px-3 py-6 text-center opacity-70">
-                            Sin préstamos registrados.
-                          </td>
-                        </tr>
-                      ) : (
-                        prestamos.map((p) => {
-                          const emp = empleados.find((e) => e.id === p.empleadoId);
-                          return (
-                            <tr key={p.id} className="even:bg-white/60 dark:even:bg-white/5">
-                              <td className="px-3 py-2">{emp?.nombre ?? "Desconocido"}</td>
-                              <td className="px-3 py-2 text-right">${fmt(p.monto)}</td>
-                              <td className="px-3 py-2">{p.descripcion || "—"}</td>
-                              <td className="px-3 py-2 text-sm opacity-70">
-                                {new Date(p.fechaISO).toLocaleDateString()}
+                              {/* Pago semanal */}
+                              <td className="px-3 py-2 text-right">
+                                <input
+                                  type="number"
+                                  className="w-28 text-right px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
+                                  value={emp.pagoSemanal}
+                                  onChange={(e) =>
+                                    setEmpleados((prev) =>
+                                      prev.map((x) =>
+                                        x.id === emp.id ? { ...x, pagoSemanal: Number(e.target.value) } : x
+                                      )
+                                    )
+                                  }
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                <input
+                                  className="w-36 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-center"
+                                  value={emp.puesto}
+                                  onChange={(e) =>
+                                    setEmpleados((prev) =>
+                                      prev.map((x) => (x.id === emp.id ? { ...x, puesto: e.target.value } : x))
+                                    )
+                                  }
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                <input
+                                  className="w-28 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-center"
+                                  value={emp.area}
+                                  onChange={(e) =>
+                                    setEmpleados((prev) =>
+                                      prev.map((x) => (x.id === emp.id ? { ...x, area: e.target.value } : x))
+                                    )
+                                  }
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                <select
+                                  className="px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
+                                  value={emp.estatus}
+                                  onChange={(e) =>
+                                    setEmpleados((prev) =>
+                                      prev.map((x) =>
+                                        x.id === emp.id ? { ...x, estatus: e.target.value as Estatus } : x
+                                      )
+                                    )
+                                  }
+                                >
+                                  <option value="Activo">Activo</option>
+                                  <option value="Baja">Baja</option>
+                                </select>
                               </td>
                               <td className="px-3 py-2 text-right">
+                                <input
+                                  type="number"
+                                  className="w-24 text-right px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
+                                  value={emp.tarifa}
+                                  onChange={(e) =>
+                                    setEmpleados((prev) =>
+                                      prev.map((x) => (x.id === emp.id ? { ...x, tarifa: Number(e.target.value) } : x))
+                                    )
+                                  }
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  className="w-20 text-right px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
+                                  value={emp.extraX}
+                                  onChange={(e) =>
+                                    setEmpleados((prev) =>
+                                      prev.map((x) => (x.id === emp.id ? { ...x, extraX: Number(e.target.value) } : x))
+                                    )
+                                  }
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-center whitespace-nowrap">
+                                <button
+                                  className="px-2 py-1 rounded-lg bg-amber-500/90 hover:bg-amber-500 text-white text-xs mr-1"
+                                  onClick={() => {
+                                    const monto = Number(prompt("Monto del préstamo:", "0"));
+                                    if (!monto || isNaN(monto)) return;
+                                    const descripcion = prompt("Descripción o motivo:", "") || "";
+                                    agregarPrestamo(emp.id, monto, descripcion);
+                                  }}
+                                >
+                                  Préstamo
+                                </button>
+
                                 <button
                                   className="px-2 py-1 rounded-lg bg-rose-500/90 hover:bg-rose-500 text-white text-xs"
-                                  onClick={() => eliminarPrestamo(p.id)}
+                                  onClick={() => setEmpleados((prev) => prev.filter((x) => x.id !== emp.id))}
                                 >
                                   Eliminar
                                 </button>
                               </td>
                             </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
+                          ))}
+
+                          {empleados.length === 0 && (
+                            <tr>
+                              <td colSpan={9} className="px-3 py-6 text-center opacity-70">
+                                Sin empleados. Agrega uno con “+ Nuevo empleado”.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
+                {/* HISTORIAL DE PRÉSTAMOS */}
+                <div className="rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
+                  <h3 className="font-semibold mb-3 text-petro-redDark">Historial de préstamos</h3>
+                  <div className="overflow-auto rounded-xl border border-petro-line/60 dark:border-white/10">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gradient-to-r from-petro-red to-petro-redDark text-white">
+                          <th className="px-3 py-2 text-left">Empleado</th>
+                          <th className="px-3 py-2 text-right">Monto</th>
+                          <th className="px-3 py-2">Descripción</th>
+                          <th className="px-3 py-2">Fecha</th>
+                          <th className="px-3 py-2"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {prestamos.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="px-3 py-6 text-center opacity-70">
+                              Sin préstamos registrados.
+                            </td>
+                          </tr>
+                        ) : (
+                          prestamos.map((p) => {
+                            const emp = empleados.find((e) => e.id === p.empleadoId);
+                            return (
+                              <tr key={p.id} className="even:bg-white/60 dark:even:bg-white/5">
+                                <td className="px-3 py-2">{emp?.nombre ?? "Desconocido"}</td>
+                                <td className="px-3 py-2 text-right">${fmt(p.monto)}</td>
+                                <td className="px-3 py-2">{p.descripcion || "—"}</td>
+                                <td className="px-3 py-2 text-sm opacity-70">
+                                  {new Date(p.fechaISO).toLocaleDateString()}
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                  <button
+                                    className="px-2 py-1 rounded-lg bg-rose-500/90 hover:bg-rose-500 text-white text-xs"
+                                    onClick={() => eliminarPrestamo(p.id)}
+                                  >
+                                    Eliminar
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             </div>
