@@ -1427,29 +1427,31 @@ export default function App() {
               </div>
 
               <div className="space-y-6">
-                {/* Tabla empleados con scroll horizontal y clipping correcto */}
-                <div className="overflow-auto rounded-2xl shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
-                  {/* capa scroller: hace el scroll y respeta el borde redondeado del padre */}
-                  <div className="overflow-x-auto overflow-y-hidden rounded-2xl scrollbar-thin scrollbar-thumb-petro-red/50 scrollbar-track-transparent hover:scrollbar-thumb-petro-red/80 overscroll-x-contain">
-                    {/* min width para evitar que salte el layout; padding derecha para que no muerda el borde */}
-                    <div className="min-w-[1100px] pr-2">
-                      <table className="w-full text-sm">
-                        <thead className="sticky top-0">
-                          <tr className="bg-gradient-to-r from-petro-red to-petro-redDark text-white">
-                            <th className="px-3 py-2 text-left">Nombre</th>
-                            <th className="px-3 py-2">Tipo pago</th>
-                            <th className="px-3 py-2 text-right">Pago semanal</th>
-                            <th className="px-3 py-2">Puesto</th>
-                            <th className="px-3 py-2">Área</th>
-                            <th className="px-3 py-2">Estatus</th>
-                            <th className="px-3 py-2 text-right">$/h</th>
-                            <th className="px-3 py-2 text-right">Extra×</th>
-                            <th className="px-3 py-2">Acciones</th>
+                <div className="rounded-2xl shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur overflow-hidden">
+                  <div className="overflow-x-auto overflow-y-hidden scrollbar-thin scrollbar-thumb-petro-red/50 scrollbar-track-transparent hover:scrollbar-thumb-petro-red/80 overscroll-x-contain">
+                    <table className="w-full min-w-[960px] text-sm">
+                      <thead className="sticky top-0">
+                        <tr className="bg-gradient-to-r from-petro-red to-petro-redDark text-white">
+                          <th className="px-3 py-2 text-left">Nombre</th>
+                          <th className="px-3 py-2">Tipo pago</th>
+                          <th className="px-3 py-2 text-right">Pago semanal</th>
+                          <th className="px-3 py-2">Puesto</th>
+                          <th className="px-3 py-2">Área</th>
+                          <th className="px-3 py-2">Estatus</th>
+                          <th className="px-3 py-2 text-right">$/h</th>
+                          <th className="px-3 py-2 text-right">Extra×</th>
+                          <th className="px-3 py-2">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {empleados.length === 0 ? (
+                          <tr>
+                            <td colSpan={9} className="px-3 py-6 text-center opacity-70">
+                              Sin empleados. Agrega uno con “+ Nuevo empleado”.
+                            </td>
                           </tr>
-                        </thead>
-
-                        <tbody>
-                          {empleados.map((emp, idx) => (
+                        ) : (
+                          empleados.map((emp, idx) => (
                             <tr
                               key={emp.id}
                               className={idx % 2 ? "bg-white/70 dark:bg-white/5" : "bg-white/40 dark:bg-transparent"}
@@ -1466,7 +1468,6 @@ export default function App() {
                                   placeholder="Nombre"
                                 />
                               </td>
-                              {/* Tipo de pago */}
                               <td className="px-3 py-2 text-center">
                                 <select
                                   className="px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
@@ -1483,8 +1484,6 @@ export default function App() {
                                   <option value="Semanal fijo">Semanal fijo</option>
                                 </select>
                               </td>
-
-                              {/* Pago semanal */}
                               <td className="px-3 py-2 text-right">
                                 <input
                                   type="number"
@@ -1562,43 +1561,39 @@ export default function App() {
                                   }
                                 />
                               </td>
-                              <td className="px-3 py-2 text-center whitespace-nowrap">
-                                <button
-                                  className="px-2 py-1 rounded-lg bg-amber-500/90 hover:bg-amber-500 text-white text-xs mr-1"
-                                  onClick={() => {
-                                    const monto = Number(prompt("Monto del préstamo:", "0"));
-                                    if (!monto || isNaN(monto)) return;
-                                    const descripcion = prompt("Descripción o motivo:", "") || "";
-                                    agregarPrestamo(emp.id, monto, descripcion);
-                                  }}
-                                >
-                                  Préstamo
-                                </button>
-
-                                <button
-                                  className="px-2 py-1 rounded-lg bg-rose-500/90 hover:bg-rose-500 text-white text-xs"
-                                  onClick={() => setEmpleados((prev) => prev.filter((x) => x.id !== emp.id))}
-                                >
-                                  Eliminar
-                                </button>
-                              </td>
+                            <td className="px-3 py-2 text-center whitespace-nowrap">
+                              <button
+                                className="px-2 py-1 rounded-lg bg-amber-500/90 hover:bg-amber-500 text-white text-xs mr-1"
+                                onClick={() => {
+                                  const monto = Number(prompt("Monto del préstamo:", "0"));
+                                  if (!monto || isNaN(monto)) return;
+                                  const descripcion = prompt("Descripción o motivo:", "") || "";
+                                  agregarPrestamo(emp.id, monto, descripcion);
+                                }}
+                                title="Registrar préstamo"
+                                aria-label="Registrar préstamo"
+                              >
+                                💵
+                              </button>
+                              <button
+                                className="px-2 py-1 rounded-lg bg-rose-500/90 hover:bg-rose-500 text-white text-xs"
+                                onClick={() =>
+                                  setEmpleados((prev) => prev.filter((x) => x.id !== emp.id))
+                                }
+                                title="Eliminar empleado"
+                                aria-label="Eliminar empleado"
+                              >
+                                🗑️
+                              </button>
+                            </td>
                             </tr>
-                          ))}
-
-                          {empleados.length === 0 && (
-                            <tr>
-                              <td colSpan={9} className="px-3 py-6 text-center opacity-70">
-                                Sin empleados. Agrega uno con “+ Nuevo empleado”.
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
 
-                {/* HISTORIAL DE PRÉSTAMOS */}
                 <div className="rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
                   <h3 className="font-semibold mb-3 text-petro-redDark">Historial de préstamos</h3>
                   <div className="overflow-auto rounded-xl border border-petro-line/60 dark:border-white/10">
