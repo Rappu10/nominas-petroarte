@@ -413,20 +413,21 @@ export default function App() {
   /* ───── Empleados (estado + persistencia) ────────────────────── */
   const [empleados, setEmpleados] = useState<Employee[]>(() => {
     const withDefaults = (list: any[]): Employee[] =>
-      list.map((emp) => ({
-        id: crypto.randomUUID(),
-        nombre: "",
-        puesto: "",
-        area: "",
-        estatus: "Activo" as Estatus,
-        tarifa: 0,
-        extraX: 1.5,
-        tipoPago: "Por horas" as TipoPago,
-        pagoSemanal: 0,
-        ...emp,
-        tipoPago: (emp?.tipoPago ?? "Por horas") as TipoPago,
-        pagoSemanal: Number(emp?.pagoSemanal ?? 0),
-      }));
+      list.map((emp) => {
+        const tipoPago = (emp?.tipoPago ?? "Por horas") as TipoPago;
+        const pagoSemanal = Number(emp?.pagoSemanal ?? 0);
+        return {
+          id: emp?.id ?? crypto.randomUUID(),
+          nombre: emp?.nombre ?? "",
+          puesto: emp?.puesto ?? "",
+          area: emp?.area ?? "",
+          estatus: (emp?.estatus ?? "Activo") as Estatus,
+          tarifa: Number(emp?.tarifa ?? 0),
+          extraX: Number(emp?.extraX ?? 1.5),
+          tipoPago,
+          pagoSemanal,
+        };
+      });
 
     try {
       const saved = localStorage.getItem("empleados_v1");
@@ -1372,7 +1373,7 @@ export default function App() {
 
           {/* ─────────────── EMPLEADOS ─────────────── */}
           {section === "empleados" && (
-            <div className="space-y-4 -ml-6 md:-ml-16">
+            <div className="space-y-4">
               {/* Barra de acciones */}
               <div className="flex flex-wrap gap-2">
                 <button
