@@ -9,6 +9,7 @@ import {
   deletePrestamo,
   createNomina,
   getNominas,
+  createCheckins,
 } from "./api";
 import type {
   Employee,
@@ -19,6 +20,7 @@ import type {
   PrestamoPayload,
   NominaPayload,
   NominaEmpleado,
+  Nomina,
 } from "./api";
 
 type Row = Record<string, any>;
@@ -107,11 +109,14 @@ export default function App() {
 
   // Datos nómina
   const [rawData, setRawData] = useState<Row[]>([]);
+  const [nominasGuardadas, setNominasGuardadas] = useState<Nomina[]>([]);
+  const [detalleNomina, setDetalleNomina] = useState<Nomina | null>(null);
   // Cargar nóminas directamente desde el backend
   useEffect(() => {
     const cargarNominas = async () => {
       try {
         const data = await getNominas();
+        setNominasGuardadas(data);
         setRawData(data);
         if (data.length > 0 && data[0].semana) setSectionTitle(data[0].semana);
       } catch (err) {
@@ -225,7 +230,7 @@ export default function App() {
     return Array.from(acc.entries())
       .map(([name, total]) => ({ name, total }))
       .sort((a, b) => b.total - a.total)
-      .slice(0, 15);
+      .slice(0, 5);
   }, [datosPeriodo, nameCol, amountCol]);
   const maxTop = useMemo(
     () => (topTotales.length ? Math.max(...topTotales.map((t) => t.total)) : 0),
@@ -562,123 +567,50 @@ async function addWeekToView() {
     }
   }
 
-  const byNombre = useMemo(() => {
-    const m = new Map<string, Employee>();
-    for (const e of empleados) m.set(e.nombre.trim().toUpperCase(), e);
-    return m;
-  }, [empleados]);
-
   /* ───── Check-in ─────────────────────────────────────────────── */
   type DayPair = { in: string; out: string };
-  type CheckRow = {
-    nombre: string;
-    LUN: DayPair; MAR: DayPair; MIE: DayPair; JUE: DayPair; VIE: DayPair; SAB: DayPair;
+  type DayKey = "LUN" | "MAR" | "MIE" | "JUE" | "VIE" | "SAB";
+  type CheckRow = { nombre: string } & Record<DayKey, DayPair>;
+  const DAY_KEYS: DayKey[] = ["LUN", "MAR", "MIE", "JUE", "VIE", "SAB"];
+  const DAY_NAME_TO_KEY: Record<string, DayKey> = {
+    Lunes: "LUN",
+    Martes: "MAR",
+    Miércoles: "MIE",
+    Jueves: "JUE",
+    Viernes: "VIE",
+    Sábado: "SAB",
   };
 
-  const [checkRows, setCheckRows] = useState<CheckRow[]>([
-    {
-      nombre: "",
-      LUN: { in: "08:30", out: "18:00" },
-      MAR: { in: "08:30", out: "18:00" },
-      MIE: { in: "", out: "" },
-      JUE: { in: "", out: "" },
-      VIE: { in: "08:30", out: "14:00" },
-      SAB: { in: "", out: "" },
-    },
-  ]);
+  const createEmptyCheckRow = (): CheckRow => ({
+    nombre: "",
+    LUN: { in: "", out: "" },
+    MAR: { in: "", out: "" },
+    MIE: { in: "", out: "" },
+    JUE: { in: "", out: "" },
+    VIE: { in: "", out: "" },
+    SAB: { in: "", out: "" },
+  });
 
-  const addCheckRow = () =>
-    setCheckRows((rows) => [
-      ...rows,
-      {
-        nombre: "",
-        LUN: { in: "", out: "" },
-        MAR: { in: "", out: "" },
-        MIE: { in: "", out: "" },
-        JUE: { in: "", out: "" },
-        VIE: { in: "", out: "" },
-        SAB: { in: "", out: "" },
-      },
-    ]);
-  const removeCheckRow = (idx: number) =>
-    setCheckRows((rows) => rows.filter((_, i) => i !== idx));
+  const [diasActivos, setDiasActivos] = useState<string[]>([]);
+  const [checkData, setCheckData] = useState<Record<string, CheckRow[]>>({});
 
-  function updateCheck(idx: number, day: keyof CheckRow, field: "in" | "out", value: string) {
-    setCheckRows((rows) =>
-      rows.map((r, i) =>
-        i === idx
-          ? {
-              ...r,
-              [day]:
-                day === "nombre"
-                  ? r[day]
-                  : {
-                      ...(r[day] as DayPair),
-                      [field]: value,
-                    },
-            }
-          : r
-      )
-    );
-  }
-  function updateCheckName(idx: number, value: string) {
-    setCheckRows((rows) => rows.map((r, i) => (i === idx ? { ...r, nombre: value } : r)));
-  }
-  function calcHoursForRow(r: CheckRow) {
-    return (
-      spanHours(r.LUN.in, r.LUN.out) +
-      spanHours(r.MAR.in, r.MAR.out) +
-      spanHours(r.MIE.in, r.MIE.out) +
-      spanHours(r.JUE.in, r.JUE.out) +
-      spanHours(r.VIE.in, r.VIE.out) +
-      spanHours(r.SAB.in, r.SAB.out)
-    );
-  }
-  function pushCheckinToDraft() {
-    const mapped = checkRows
-      .filter((r) => r.nombre.trim() !== "")
-      .map((r) => {
-        const hours = Number(calcHoursForRow(r).toFixed(2));
+  const updateDiaRows = (dia: string, updater: (rows: CheckRow[]) => CheckRow[]) => {
+    setCheckData((prev) => {
+      const current = prev[dia] ?? [];
+      const next = updater(current);
+      return { ...prev, [dia]: next };
+    });
+  };
 
-        // Busca empleado para tarifas; si no, deja en 0
-        const emp = byNombre.get(r.nombre.trim().toUpperCase());
-        const base =
-          emp?.tipoPago === "Semanal fijo"
-            ? (emp?.pagoSemanal ?? 0) / 48
-            : emp?.tarifa ?? 0;
-        const mult = emp?.extraX ?? extraMultiplier;
-        const costoExtra = autoExtra ? Math.round(base * mult * 100) / 100 : 0;
-
-        // Si está activo el auto de horas extra por umbral
-        let prim = hours;
-        let ext = 0;
-        if (autoHorasExtra) {
-          ext = Math.max(0, hours - extrasThreshold);
-          prim = Math.min(hours, extrasThreshold);
-        }
-
-        return {
-          nombre: r.nombre,
-          total_horas_primarias: prim,
-          horas_extras: ext,
-          costo_hora_primaria: base,
-          costo_hora_extra: costoExtra,
-          bono_semanal: 0,
-          descuentos: 0,
-          pendiente_descuento: 0,
-          pago_semanal_base: 0,
-          extra: "",
-        };
-      }) as Draft[];
-
-    if (!mapped.length) {
-      alert("Captura al menos un empleado con horario.");
+  const addCheckRow = () => {
+    const dia = diasActivos[diasActivos.length - 1];
+    if (!dia) {
+      alert("Agrega un día antes de insertar filas.");
       return;
     }
-    setDraftRows(mapped);
-    setSection("nominas");
-    setEditorOpen(true);
-  }
+    updateDiaRows(dia, (rows) => [...rows, createEmptyCheckRow()]);
+  };
+
   function loadUserTemplate() {
     const toRow = (arr: Array<string | undefined>): CheckRow => ({
       nombre: "",
@@ -705,7 +637,42 @@ async function addWeekToView() {
       toRow(["08:30","18:00","08:45","18:00","08:45","","08:30","14:00","","",""]),
       toRow(["08:30","18:00","08:30","18:00","08:30","","08:30","14:00","","",""]),
     ];
-    setCheckRows(rows);
+    const nombresDias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+    const data: Record<string, CheckRow[]> = {};
+    nombresDias.forEach((nombre, idx) => {
+      const key = DAY_KEYS[idx];
+      data[nombre] = rows.map((row) => ({
+        ...createEmptyCheckRow(),
+        nombre: row.nombre,
+        [key]: { ...row[key] },
+      }));
+    });
+    setDiasActivos(nombresDias);
+    setCheckData(data);
+  }
+
+  async function guardarCheckins(dia: string) {
+    try {
+      const registros = (checkData[dia] || []).map((r) => ({
+        nombre: r.nombre,
+        dia,
+        horaEntrada: r.LUN.in,
+        horaSalida: r.LUN.out,
+        horasTotales: spanHours(r.LUN.in, r.LUN.out),
+        semana: "SEMANA 58",
+      }));
+
+      if (!registros.length) {
+        alert("⚠️ No hay registros para guardar.");
+        return;
+      }
+
+      await createCheckins(registros);
+      alert(`✅ Check-ins del ${dia} guardados correctamente.`);
+    } catch (err) {
+      console.error("❌ Error al guardar check-ins:", err);
+      alert("Error al guardar check-ins. Ver consola.");
+    }
   }
 
   /* ───── Billetes (estado + persistencia) ─────────────────────── */
@@ -863,7 +830,7 @@ async function addWeekToView() {
             <div className="mt-4 text-xs/relaxed px-2 py-2 bg-white/10 rounded-xl">
               <div className="opacity-80">Consejo</div>
               <div className="opacity-75">
-                Captura entradas/salidas en “Check-in” y envía a “Nueva semana”.
+                Captura entradas/salidas en “Check-in” y guarda el día.
               </div>
             </div>
           </div>
@@ -888,78 +855,233 @@ async function addWeekToView() {
                   >
                     Cargar plantilla (14 empleados)
                   </button>
-                  <button
-                    className="ml-auto px-3 py-2 rounded-xl bg-gradient-to-r from-petro-redDark to-petro-red text-white text-sm shadow"
-                    onClick={pushCheckinToDraft}
-                  >
-                    Enviar a “Nueva semana”
-                  </button>
                 </div>
               </div>
 
               {/* SCROLL CONTROLADO */}
               <div className="rounded-2xl shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
-                <div className="overflow-x-auto">
-                  <table className="w-full table-fixed border-collapse text-[13px]">
-                    <colgroup>
-                      <col className="w-[220px]" />
-                      <col />
-                      <col />
-                      <col />
-                      <col />
-                      <col />
-                      <col />
-                      <col className="w-[90px]" />
-                      <col className="w-[60px]" />
-                    </colgroup>
-                    <thead>
-                      <tr className="bg-gradient-to-r from-petro-red to-petro-redDark text-white">
-                        <th className="px-3 py-2 text-left">Nombre</th>
-                        {["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"].map((d) => (
-                          <th key={d} className="px-2 py-2 text-center">{d}</th>
-                        ))}
-                        <th className="px-2 py-2 text-right">Horas (sem)</th>
-                        <th className="px-2 py-2"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {empleados.map((emp, idx) => (
-                        <tr
-                          key={idx}
-                          className="border-b border-black/10 dark:border-white/10"
-                        >
-                          <td className="px-4 py-2 font-semibold">{emp.nombre}</td>
-                          {["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"].map(
-                            (d, i) => (
-                              <td key={i} className="px-4 py-2">
-                                <div className="flex items-center gap-2">
-                                  <input
-                                    type="time"
-                                    defaultValue="00:00"
-                                    className="px-2 py-1 w-24 rounded-md border border-black/10 dark:border-white/10 bg-white/70 dark:bg-white/10 text-center"
-                                  />
-                                  <span>→</span>
-                                  <input
-                                    type="time"
-                                    defaultValue="00:00"
-                                    className="px-2 py-1 w-24 rounded-md border border-black/10 dark:border-white/10 bg-white/70 dark:bg-white/10 text-center"
-                                  />
-                                </div>
-                              </td>
-                            )
-                          )}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                {/* Selector de día */}
+                <div className="flex flex-wrap gap-3 items-center mb-4 px-4 pt-4">
+                  <select
+                    id="nuevo-dia"
+                    className="px-3 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-sm"
+                    defaultValue=""
+                  >
+                    <option value="">Seleccionar día…</option>
+                    {["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"].map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+
+                  <button
+                    onClick={() => {
+                      const select = document.getElementById("nuevo-dia") as HTMLSelectElement | null;
+                      if (!select) return;
+                      const dia = select.value;
+                      if (!dia) return alert("Selecciona un día antes de agregar.");
+                      if (diasActivos.includes(dia))
+                        return alert(`⚠️ El día ${dia} ya está agregado.`);
+
+                      setDiasActivos((prev) => [...prev, dia]);
+                      setCheckData((prev) => ({
+                        ...prev,
+                        [dia]: [
+                          {
+                            nombre: "",
+                            LUN: { in: "", out: "" },
+                            MAR: { in: "", out: "" },
+                            MIE: { in: "", out: "" },
+                            JUE: { in: "", out: "" },
+                            VIE: { in: "", out: "" },
+                            SAB: { in: "", out: "" },
+                          },
+                        ],
+                      }));
+                      select.value = "";
+                    }}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-petro-red to-petro-redDark text-white text-sm shadow"
+                  >
+                    + Agregar día
+                  </button>
                 </div>
 
-                <div className="p-2 text-xs opacity-80 text-right">
-                  Total horas (todas las filas):{" "}
-                  <b>
-                    {fmt(checkRows.reduce((a, r) => a + calcHoursForRow(r), 0))}
-                  </b>
-                </div>
+                {diasActivos.length === 0 ? (
+                  <p className="opacity-70 text-sm px-4 pb-4">
+                    No hay días agregados aún. Selecciona uno y pulsa “Agregar día”.
+                  </p>
+                ) : (
+                  diasActivos.map((dia) => {
+                    const dayKey = DAY_NAME_TO_KEY[dia] ?? "LUN";
+                    const normalizedDia = encodeURIComponent(dia.toLowerCase());
+                    return (
+                      <div
+                      key={dia}
+                      className="mb-8 rounded-2xl shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur"
+                    >
+                      <div className="flex justify-between items-center bg-gradient-to-r from-petro-red to-petro-redDark text-white px-4 py-2 rounded-t-2xl">
+                        <h3 className="font-semibold">{dia}</h3>
+                        <button
+                          className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-md text-sm"
+                          onClick={() => {
+                            setDiasActivos((prev) => prev.filter((d) => d !== dia));
+                            setCheckData((prev) => {
+                              const copy = { ...prev };
+                              delete copy[dia];
+                              return copy;
+                            });
+                          }}
+                        >
+                          ✕ Eliminar día
+                        </button>
+                      </div>
+
+                      {/* Tabla de empleados del día */}
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-petro-charcoal text-white">
+                              <th className="px-3 py-2 text-left">Empleado</th>
+                              <th className="px-3 py-2 text-center">Entrada</th>
+                              <th className="px-3 py-2 text-center">Salida</th>
+                              <th className="px-3 py-2 text-right">Horas</th>
+                              <th className="px-3 py-2"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {checkData[dia]?.map((r, idx) => {
+                              const total = spanHours(r[dayKey].in, r[dayKey].out);
+                              const empleadosList = empleados.map((e) => e.nombre);
+                              return (
+                                <tr
+                                  key={idx}
+                                  className="odd:bg-white/50 dark:odd:bg-white/5 even:bg-white/20 dark:even:bg-transparent"
+                                >
+                                  <td className="px-3 py-2">
+                                    <input
+                                      list={`empleados-${normalizedDia}-${idx}`}
+                                      value={r.nombre}
+                                      onChange={(e) => {
+                                        setCheckData((prev) => {
+                                          const rows = [...(prev[dia] || [])];
+                                          const current = rows[idx];
+                                          rows[idx] = { ...current, nombre: e.target.value };
+                                          return { ...prev, [dia]: rows };
+                                        });
+                                      }}
+                                      className="w-44 px-2 py-1 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
+                                      placeholder="Empleado"
+                                    />
+                                    <datalist id={`empleados-${normalizedDia}-${idx}`}>
+                                      {empleadosList.map((n) => (
+                                        <option key={n} value={n} />
+                                      ))}
+                                    </datalist>
+                                  </td>
+                                  <td className="px-3 py-2 text-center">
+                                    <input
+                                      type="time"
+                                      value={r[dayKey].in}
+                                      onChange={(e) => {
+                                        const value = e.target.value;
+                                        setCheckData((prev) => {
+                                          const rows = [...(prev[dia] || [])];
+                                          const current = rows[idx];
+                                          rows[idx] = {
+                                            ...current,
+                                            [dayKey]: { ...current[dayKey], in: value },
+                                          };
+                                          return { ...prev, [dia]: rows };
+                                        });
+                                      }}
+                                      className="px-2 py-1 w-24 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-center"
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2 text-center">
+                                    <input
+                                      type="time"
+                                      value={r[dayKey].out}
+                                      onChange={(e) => {
+                                        const value = e.target.value;
+                                        setCheckData((prev) => {
+                                          const rows = [...(prev[dia] || [])];
+                                          const current = rows[idx];
+                                          rows[idx] = {
+                                            ...current,
+                                            [dayKey]: { ...current[dayKey], out: value },
+                                          };
+                                          return { ...prev, [dia]: rows };
+                                        });
+                                      }}
+                                      className="px-2 py-1 w-24 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-center"
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2 text-right font-mono">{fmt(total)}</td>
+                                  <td className="px-3 py-2 text-right">
+                                    <button
+                                      onClick={() => {
+                                        const nuevo = (checkData[dia] || []).filter((_, i) => i !== idx);
+                                        setCheckData((p) => ({ ...p, [dia]: nuevo }));
+                                      }}
+                                      className="px-2 py-1 rounded-md bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
+                                    >
+                                      ✕
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Botón para agregar empleado al día */}
+                      <div className="p-3 flex justify-end items-center gap-3">
+                        <button
+                          onClick={() => {
+                            setCheckData((prev) => ({
+                              ...prev,
+                              [dia]: [...(prev[dia] || []), createEmptyCheckRow()],
+                            }));
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-petro-red text-white text-sm"
+                        >
+                          + Agregar empleado
+                        </button>
+                        <button
+                          onClick={() => guardarCheckins(dia)}
+                          className="ml-3 px-4 py-2 rounded-xl bg-green-600 text-white text-sm shadow hover:bg-green-700"
+                        >
+                          💾 Guardar {dia}
+                        </button>
+                      </div>
+                    </div>
+                    );
+                  })
+                )}
+                <button
+                  className="mt-3 px-4 py-2 rounded-xl bg-green-600 text-white text-sm shadow hover:bg-green-700"
+                  onClick={async () => {
+                    try {
+                      const res = await fetch("http://localhost:4000/api/checkins/cerrar-semana", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ semana: "SEMANA 58" }),
+                      });
+                      if (!res.ok) {
+                        const message = await res.text();
+                        throw new Error(message || `Request failed: ${res.status}`);
+                      }
+                      alert("✅ Semana cerrada y nóminas generadas");
+                    } catch (err) {
+                      console.error("❌ Error al cerrar semana:", err);
+                      alert("No se pudo cerrar la semana. Revisa la consola.");
+                    }
+                  }}
+                >
+                  🧾 Cerrar semana y generar nómina
+                </button>
               </div>
             </div>
           )}
@@ -1424,7 +1546,7 @@ async function addWeekToView() {
                 {/* Top 15 */}
                 <div className="rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/70 dark:bg-white/5 backdrop-blur">
                   <h2 className="font-semibold mb-3">
-                    Top 15 por total ({amountCol || "monto"})
+                    Top 5 por total ({amountCol || "monto"})
                     {periodo ? ` · ${periodo}` : ""}
                   </h2>
                   {!nameCol || !amountCol ? (
@@ -1450,6 +1572,60 @@ async function addWeekToView() {
                     </ul>
                   )}
                 </div>
+              </section>
+
+              <section className="rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-[#161616] text-gray-100 backdrop-blur space-y-4">
+                <header className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold text-white">Historial de nóminas guardadas</h2>
+                    <p className="text-sm opacity-70">Revisa los empleados capturados en cada semana.</p>
+                  </div>
+                  <span className="text-xs opacity-60">
+                    {nominasGuardadas.length.toLocaleString()} registros
+                  </span>
+                </header>
+                {nominasGuardadas.length === 0 ? (
+                  <p className="text-sm opacity-70">Aún no has guardado nóminas.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-collapse text-sm bg-[#1b1b1b] rounded-xl overflow-hidden">
+                      <thead>
+                        <tr className="bg-petro-red text-white">
+                          <th className="p-2 text-left">Semana</th>
+                          <th className="p-2 text-left">Empleados</th>
+                          <th className="p-2 text-center">Total general</th>
+                          <th className="p-2 text-left">Fecha</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {nominasGuardadas.map((nomina, index) => (
+                          <tr key={index} className="border-t border-gray-700 hover:bg-[#2B2B2B]">
+                            <td className="p-2 font-semibold">{nomina.semana}</td>
+
+                            <td className="p-2">
+                              <button
+                                onClick={() => setDetalleNomina(nomina)}
+                                className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm"
+                              >
+                                Ver detalles
+                              </button>
+                            </td>
+
+                            <td className="p-2 text-center font-bold text-green-400">
+                              ${nomina.totalGeneral?.toFixed?.(2) ?? fmt(Number(nomina.totalGeneral ?? 0))}
+                            </td>
+                            <td className="p-2 text-gray-400">
+                              {(() => {
+                                const fecha = nomina.fechaRegistro || nomina.createdAt;
+                                return fecha ? new Date(fecha).toLocaleDateString() : "Sin fecha";
+                              })()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </section>
             </>
           )}
@@ -1866,12 +2042,66 @@ async function addWeekToView() {
               </div>
             </div>
           )}
+          {detalleNomina && (
+            <div className="fixed inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm z-50">
+              <div className="bg-[#1E1E1E] w-[800px] max-h-[90vh] overflow-y-auto rounded-2xl p-6 shadow-xl border border-gray-700">
+                <h2 className="text-2xl font-bold text-amber-400 mb-4">
+                  Detalles de {detalleNomina.semana}
+                </h2>
+
+                <table className="w-full border-collapse text-sm">
+                  <thead className="bg-[#A52A2A] text-gray-100">
+                    <tr>
+                      <th className="p-2 text-left">Empleado</th>
+                      <th className="p-2 text-left">Horas primarias</th>
+                      <th className="p-2 text-left">Horas extras</th>
+                      <th className="p-2 text-left">Pago base</th>
+                      <th className="p-2 text-left">Bono semanal</th>
+                      <th className="p-2 text-left">Bono mensual</th>
+                      <th className="p-2 text-left">Comisión</th>
+                      <th className="p-2 text-left">Descuentos</th>
+                      <th className="p-2 text-left text-green-400">Total final</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detalleNomina.empleados.map((e: any, i: number) => (
+                      <tr key={i} className="border-b border-gray-700 hover:bg-[#2B2B2B]">
+                        <td className="p-2 font-semibold text-amber-300">{e.nombre}</td>
+                        <td className="p-2">{e.total_horas_primarias}</td>
+                        <td className="p-2">{e.horas_extras}</td>
+                        <td className="p-2">${e.costo_hora_primaria}</td>
+                        <td className="p-2">${e.bono_semanal}</td>
+                        <td className="p-2">${e.bono_mensual}</td>
+                        <td className="p-2">${e.comision}</td>
+                        <td className="p-2 text-red-400">-${e.descuentos}</td>
+                        <td className="p-2 font-bold text-green-400">${e.total_final}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                <div className="mt-6 flex justify-between items-center border-t border-gray-700 pt-4">
+                  <p className="text-lg font-semibold text-gray-300">
+                    Total general:&nbsp;
+                    <span className="text-green-400">
+                      ${detalleNomina.totalGeneral.toFixed(2)}
+                    </span>
+                  </p>
+                  <button
+                    onClick={() => setDetalleNomina(null)}
+                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </main>
       </div>
     </div>
   );
 }
-
 /* ───── Componentes auxiliares ─────────────────────────────────── */
 function MetricCard({
   title,

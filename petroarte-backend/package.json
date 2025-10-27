@@ -2,9 +2,9 @@
   "name": "petroarte-backend",
   "version": "1.0.0",
   "scripts": {
-  "build": "tsc",
-  "start": "node dist/server.js"
-},
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -12,6 +12,7 @@
     "mongoose": "^8.7.1"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
     "@types/node": "^20.12.12",
     "ts-node": "^10.9.2",
