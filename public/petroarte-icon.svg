@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="petroarteGradient" x1="12" y1="6" x2="52" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F5AAA"/>
+      <stop offset="1" stop-color="#00B3A4"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#petroarteGradient)"/>
+  <path fill="#F5FBFF" d="M22 18h12a12 12 0 0 1 0 24h-6v10h-6V18Zm12 18a6 6 0 0 0 0-12h-6v12h6Z"/>
+</svg>
