@@ -489,7 +489,7 @@ async function addWeekToView() {
       area: "Planta",
       estatus: "Activo",
       tarifa: 50,
-      extraX: 1.5,
+      extraX: 1.8,
       tipoPago: "Por horas",
       pagoSemanal: 0,
     };

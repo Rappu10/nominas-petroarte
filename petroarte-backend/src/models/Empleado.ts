@@ -7,7 +7,7 @@ const empleadoSchema = new Schema(
     area: { type: String, required: true },
     estatus: { type: String, enum: ["Activo", "Baja"], default: "Activo" },
     tarifa: { type: Number, required: true },
-    extraX: { type: Number, default: 1.5 },
+    extraX: { type: Number, default: 1. },
     tipoPago: { type: String, enum: ["Por horas", "Semanal fijo"], default: "Por horas" },
     pagoSemanal: { type: Number, default: 0 },
   },
