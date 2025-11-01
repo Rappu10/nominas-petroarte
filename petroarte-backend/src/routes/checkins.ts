@@ -44,4 +44,53 @@ router.post("/", async (req, res) => {
   }
 });
 
+// 🔹 POST — cerrar semana (resumen por empleado)
+router.post("/cerrar-semana", async (req, res) => {
+  try {
+    const semanaInput: unknown = req.body?.semana;
+    if (typeof semanaInput !== "string" || !semanaInput.trim()) {
+      return res.status(400).json({ error: "Debe enviar el nombre de la semana." });
+    }
+
+    const semana = semanaInput.trim();
+    const registros = await Checkin.find({ semana }).sort({ nombre: 1, fecha: 1 });
+
+    if (!registros.length) {
+      return res.status(404).json({
+        error: `No hay registros de check-in para la semana "${semana}".`,
+      });
+    }
+
+    type Resumen = { horasTotales: number; registros: number };
+    const resumen = new Map<string, Resumen>();
+
+    registros.forEach((registro) => {
+      const nombre = (registro.nombre || "Sin nombre").trim() || "Sin nombre";
+      const current = resumen.get(nombre) ?? { horasTotales: 0, registros: 0 };
+      current.horasTotales += Number(registro.horasTotales || 0);
+      current.registros += 1;
+      resumen.set(nombre, current);
+    });
+
+    const empleados = Array.from(resumen.entries())
+      .map(([nombre, data]) => ({
+        nombre,
+        horasTotales: Number(data.horasTotales.toFixed(2)),
+        registros: data.registros,
+      }))
+      .sort((a, b) => a.nombre.localeCompare(b.nombre));
+
+    res.json({
+      message: `Semana "${semana}" cerrada correctamente.`,
+      semana,
+      totalRegistros: registros.length,
+      totalEmpleados: empleados.length,
+      empleados,
+    });
+  } catch (error) {
+    console.error("❌ Error al cerrar semana de check-ins:", error);
+    res.status(500).json({ error: "Error interno al cerrar la semana de check-ins." });
+  }
+});
+
 export default router;

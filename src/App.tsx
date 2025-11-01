@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   getEmpleados,
   createEmpleado,
@@ -10,6 +10,8 @@ import {
   createNomina,
   getNominas,
   createCheckins,
+  getCheckins,
+  closeCheckinWeek,
 } from "./api";
 import type {
   Employee,
@@ -20,11 +22,27 @@ import type {
   PrestamoPayload,
   NominaPayload,
   NominaEmpleado,
-  Nomina,
+  Checkin,
+  CloseCheckinWeekResponse,
 } from "./api";
 
 type Row = Record<string, any>;
 type Section = "nominas" | "empleados" | "checkin" | "billetes";
+type NominaRegistro = NominaEmpleado & {
+  _id?: string;
+  semana?: string;
+  fechaRegistro?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  totalGeneral?: number;
+};
+type NominaSemana = {
+  semana: string;
+  empleados: NominaEmpleado[];
+  totalGeneral: number;
+  createdAt?: string;
+  fechaRegistro?: string;
+};
 
 /* ───── Utilidades ─────────────────────────────────────────────── */
 function toCSV(rows: Row[]): string {
@@ -78,6 +96,87 @@ function spanHours(start: string, end: string): number {
   return d > 0 ? d : 0;
 }
 
+function safeNumber(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function round2(value: number): number {
+  return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+}
+
+function pickNumber(...values: unknown[]): number {
+  for (const value of values) {
+    if (value !== undefined && value !== null) {
+      const parsed = safeNumber(value);
+      if (parsed !== 0 || value === 0 || value === "0") return parsed;
+    }
+  }
+  return 0;
+}
+
+function agruparNominasPorSemana(registros: NominaRegistro[]): NominaSemana[] {
+  const map = new Map<string, NominaSemana>();
+
+  const getTime = (value?: string) => {
+    if (!value) return 0;
+    const time = Date.parse(value);
+    return Number.isNaN(time) ? 0 : time;
+  };
+
+  registros.forEach((registro) => {
+    const semana = registro.semana?.trim() || "Sin semana";
+    const {
+      _id: _omitId,
+      createdAt,
+      updatedAt,
+      fechaRegistro,
+      totalGeneral: totalGeneralRegistro,
+      empleados: _empleadosNested,
+      ...resto
+    } = registro;
+
+    const empleado = resto as NominaEmpleado;
+    const totalEmpleado = pickNumber(
+      (empleado as Partial<NominaEmpleado>).total_final,
+      (empleado as Partial<NominaEmpleado>).total,
+      totalGeneralRegistro
+    );
+
+    const existente = map.get(semana);
+    if (existente) {
+      existente.empleados.push(empleado);
+      existente.totalGeneral += totalEmpleado;
+
+      const existenteTime = getTime(existente.createdAt);
+      const createdTime = getTime(createdAt);
+      if (createdTime > existenteTime) {
+        existente.createdAt = createdAt;
+      }
+      if (!existente.fechaRegistro && fechaRegistro) {
+        existente.fechaRegistro = fechaRegistro;
+      }
+    } else {
+      map.set(semana, {
+        semana,
+        empleados: [empleado],
+        totalGeneral: totalEmpleado,
+        createdAt: createdAt ?? updatedAt ?? fechaRegistro,
+        fechaRegistro,
+      });
+    }
+  });
+
+  return Array.from(map.values()).sort((a, b) => {
+    const aTime = Date.parse(a.createdAt ?? "") || 0;
+    const bTime = Date.parse(b.createdAt ?? "") || 0;
+    if (bTime === aTime) {
+      return b.semana.localeCompare(a.semana);
+    }
+    return bTime - aTime;
+  });
+}
+
 /** Tema oscuro con persistencia */
 function useTheme() {
   const [dark, setDark] = useState<boolean>(() => {
@@ -109,23 +208,51 @@ export default function App() {
 
   // Datos nómina
   const [rawData, setRawData] = useState<Row[]>([]);
-  const [nominasGuardadas, setNominasGuardadas] = useState<Nomina[]>([]);
-  const [detalleNomina, setDetalleNomina] = useState<Nomina | null>(null);
-  // Cargar nóminas directamente desde el backend
-  useEffect(() => {
-    const cargarNominas = async () => {
-      try {
-        const data = await getNominas();
-        setNominasGuardadas(data);
-        setRawData(data);
-        if (data.length > 0 && data[0].semana) setSectionTitle(data[0].semana);
-      } catch (err) {
-        console.error("❌ Error al cargar nóminas:", err);
+  const [nominasGuardadas, setNominasGuardadas] = useState<NominaSemana[]>([]);
+  const [detalleNomina, setDetalleNomina] = useState<NominaSemana | null>(null);
+  const [semanaCheckin, setSemanaCheckin] = useState<string>("");
+  const [empleados, setEmpleados] = useState<Employee[]>([]);
+  const [loadingEmpleados, setLoadingEmpleados] = useState(false);
+  const refrescarNominas = useCallback(async () => {
+    try {
+      const data = await getNominas();
+      const registros = ((Array.isArray(data) ? data : []) as unknown) as NominaRegistro[];
+      setRawData(registros);
+      const agrupadas = agruparNominasPorSemana(registros);
+      setNominasGuardadas(agrupadas);
+      if (agrupadas.length > 0) {
+        setSectionTitle(agrupadas[0].semana);
       }
-    };
-    cargarNominas();
+    } catch (err) {
+      console.error("❌ Error al cargar nóminas:", err);
+    }
   }, []);
 
+  // Cargar nóminas directamente desde el backend
+  useEffect(() => {
+    void refrescarNominas();
+  }, [refrescarNominas]);
+
+  useEffect(() => {
+    if (!semanaCheckin && sectionTitle) {
+      setSemanaCheckin(sectionTitle);
+    }
+  }, [sectionTitle, semanaCheckin]);
+
+  useEffect(() => {
+    const cargar = async () => {
+      setLoadingEmpleados(true);
+      try {
+        const data = await getEmpleados();
+        setEmpleados(data);
+      } catch (err) {
+        console.error("❌ Error al cargar empleados:", err);
+      } finally {
+        setLoadingEmpleados(false);
+      }
+    };
+    cargar();
+  }, []);
 
   // Columnas
   const columns = useMemo(
@@ -259,6 +386,89 @@ export default function App() {
   const [extraMultiplier, setExtraMultiplier] = useState<number>(1.8);
   const [autoHorasExtra, setAutoHorasExtra] = useState<boolean>(false);
   const [extrasThreshold, setExtrasThreshold] = useState<number>(53);
+
+  const crearNominaDesdeResumen = useCallback(
+    (resumen: CloseCheckinWeekResponse): NominaPayload => {
+      const empleadosNomina: NominaEmpleado[] = (resumen.empleados ?? []).map((registro) => {
+        const nombre = registro.nombre?.trim() || "Sin nombre";
+        const horasTotales = safeNumber(registro.horasTotales);
+        const umbralPrimarias = extrasThreshold > 0 ? extrasThreshold : horasTotales;
+        const horasPrimarias = Math.min(horasTotales, umbralPrimarias);
+        const horasExtras = Math.max(0, horasTotales - umbralPrimarias);
+
+        const empleadoData = empleados.find(
+          (emp) => emp.nombre?.toLowerCase().trim() === nombre.toLowerCase()
+        );
+
+        let costoHoraPrimaria = safeNumber(empleadoData?.tarifa);
+        if (!costoHoraPrimaria && empleadoData?.tipoPago === "Semanal fijo") {
+          const divisor = umbralPrimarias || horasTotales || 1;
+          costoHoraPrimaria = safeNumber(empleadoData?.pagoSemanal) / divisor;
+        }
+        if (!costoHoraPrimaria) costoHoraPrimaria = 0;
+
+        const multiplicadorExtra =
+          safeNumber(empleadoData?.extraX) > 0
+            ? safeNumber(empleadoData?.extraX)
+            : extraMultiplier || 1.8;
+        const costoHoraExtra =
+          multiplicadorExtra > 0 ? costoHoraPrimaria * multiplicadorExtra : costoHoraPrimaria;
+
+        const pagoHorasPrimarias = horasPrimarias * costoHoraPrimaria;
+        const pagoHorasExtras = horasExtras * costoHoraExtra;
+        const pagoSemanalCalc = pagoHorasPrimarias + pagoHorasExtras;
+        const pagoSemanalBase = safeNumber(empleadoData?.pagoSemanal);
+        const descuentos = 0;
+        const pendienteDescuento = 0;
+        const bonoSemanal = 0;
+        const bonoMensual = 0;
+        const comision = 0;
+
+        const total = pagoSemanalCalc - descuentos;
+        const total2 = total + bonoSemanal;
+        const totalConBonoMensual = total2 + bonoMensual;
+        const totalFinal = totalConBonoMensual + comision;
+
+        return {
+          nombre,
+          total_horas: round2(horasTotales),
+          horas_primarias: round2(horasPrimarias),
+          horas_extras: round2(horasExtras),
+          pago_semanal_base: round2(pagoSemanalBase),
+          costo_hora_primaria: round2(costoHoraPrimaria),
+          total_horas_primarias: round2(horasPrimarias),
+          pago_horas_primarias: round2(pagoHorasPrimarias),
+          costo_hora_extra: round2(costoHoraExtra),
+          pago_horas_extras: round2(pagoHorasExtras),
+          pago_semanal_calc: round2(pagoSemanalCalc),
+          descuentos: round2(descuentos),
+          pendiente_descuento: round2(pendienteDescuento),
+          total: round2(total),
+          bono_semanal: round2(bonoSemanal),
+          total_2: round2(total2),
+          bono_mensual: round2(bonoMensual),
+          comision: round2(comision),
+          comisiones: round2(comision),
+          total_con_bono_mensual: round2(totalConBonoMensual),
+          total_con_comision: round2(totalFinal),
+          extra: null,
+          total_final: round2(totalFinal),
+        };
+      });
+
+      const totalGeneral = empleadosNomina.reduce(
+        (acc, emp) => acc + safeNumber(emp.total_final),
+        0
+      );
+
+      return {
+        semana: resumen.semana,
+        empleados: empleadosNomina,
+        totalGeneral: round2(totalGeneral),
+      };
+    },
+    [empleados, extrasThreshold, extraMultiplier]
+  );
 
   type Draft = {
     nombre: string;
@@ -415,10 +625,8 @@ async function addWeekToView() {
       empleados: newRows,
       totalGeneral,
     };
-    const saved = await createNomina(payload);
-
-    setRawData((prev) => [...newRows, ...prev]);
-    setSectionTitle(saved.semana);
+    await createNomina(payload);
+    await refrescarNominas();
     alert("✅ Nómina guardada en MongoDB");
   } catch (err) {
     console.error("❌ Error al guardar nómina:", err);
@@ -462,25 +670,6 @@ async function addWeekToView() {
     a.click();
     URL.revokeObjectURL(url);
   }
-
-  /* ───── Empleados (cargados desde Mongo) ─────────────────────── */
-  const [empleados, setEmpleados] = useState<Employee[]>([]);
-  const [loadingEmpleados, setLoadingEmpleados] = useState(false);
-
-  useEffect(() => {
-    const cargar = async () => {
-      setLoadingEmpleados(true);
-      try {
-        const data = await getEmpleados();
-        setEmpleados(data);
-      } catch (err) {
-        console.error("❌ Error al cargar empleados:", err);
-      } finally {
-        setLoadingEmpleados(false);
-      }
-    };
-    cargar();
-  }, []);
 
   async function agregarEmpleado() {
     const nuevo: EmployeePayload = {
@@ -571,7 +760,6 @@ async function addWeekToView() {
   type DayPair = { in: string; out: string };
   type DayKey = "LUN" | "MAR" | "MIE" | "JUE" | "VIE" | "SAB";
   type CheckRow = { nombre: string } & Record<DayKey, DayPair>;
-  const DAY_KEYS: DayKey[] = ["LUN", "MAR", "MIE", "JUE", "VIE", "SAB"];
   const DAY_NAME_TO_KEY: Record<string, DayKey> = {
     Lunes: "LUN",
     Martes: "MAR",
@@ -593,6 +781,105 @@ async function addWeekToView() {
 
   const [diasActivos, setDiasActivos] = useState<string[]>([]);
   const [checkData, setCheckData] = useState<Record<string, CheckRow[]>>({});
+  const [historialCheckins, setHistorialCheckins] = useState<Checkin[]>([]);
+  const [historialCargando, setHistorialCargando] = useState(false);
+  const [historialError, setHistorialError] = useState<string | null>(null);
+  const [historialLoaded, setHistorialLoaded] = useState(false);
+
+  const historialDias = useMemo(() => {
+    type HistorialDiaInternal = {
+      key: string;
+      fechaLabel: string;
+      fechaOrden: number;
+      dia: string;
+      semana: string;
+      total: number;
+      nombres: Set<string>;
+    };
+    const map = new Map<string, HistorialDiaInternal>();
+
+    historialCheckins.forEach((registro) => {
+      const fechaRaw = registro.fecha ?? registro.createdAt ?? "";
+      const parsedDate = fechaRaw ? new Date(fechaRaw) : null;
+      const timestamp = parsedDate?.getTime();
+      const fechaValida = typeof timestamp === "number" && !Number.isNaN(timestamp);
+      const fechaDate = fechaValida ? parsedDate : null;
+      const fechaClave = fechaDate ? fechaDate.toISOString().slice(0, 10) : "sin-fecha";
+      const key = `${fechaClave}|${registro.semana ?? ""}|${registro.dia}`;
+      const fechaLabel = fechaDate
+        ? fechaDate.toLocaleDateString(undefined, {
+            weekday: "short",
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+          })
+        : "Sin fecha";
+      const fechaOrden = fechaValida ? timestamp ?? 0 : 0;
+
+      const current = map.get(key);
+      if (current) {
+        current.total += 1;
+        if (registro.nombre) current.nombres.add(registro.nombre);
+      } else {
+        const nombresSet = new Set<string>();
+        if (registro.nombre) nombresSet.add(registro.nombre);
+        map.set(key, {
+          key,
+          fechaLabel,
+          fechaOrden,
+          dia: registro.dia,
+          semana: registro.semana ?? "",
+          total: 1,
+          nombres: nombresSet,
+        });
+      }
+    });
+
+    return Array.from(map.values())
+      .map((entry) => ({
+        key: entry.key,
+        fechaLabel: entry.fechaLabel,
+        fechaOrden: entry.fechaOrden,
+        dia: entry.dia,
+        semana: entry.semana,
+        total: entry.total,
+        nombres: Array.from(entry.nombres).sort((a, b) => a.localeCompare(b)),
+      }))
+      .sort((a, b) => b.fechaOrden - a.fechaOrden);
+  }, [historialCheckins]);
+
+  const HISTORIAL_MAX_FILAS = 25;
+
+  function resumirNombres(nombres: string[]): string {
+    if (!nombres.length) return "—";
+    const limite = 5;
+    const visibles = nombres.slice(0, limite);
+    const restantes = nombres.length - visibles.length;
+    return restantes > 0
+      ? `${visibles.join(", ")} y ${restantes} más`
+      : visibles.join(", ");
+  }
+
+  const cargarHistorial = useCallback(
+    async (force = false) => {
+      if (historialCargando) return;
+      if (!force && historialLoaded) return;
+      try {
+        setHistorialCargando(true);
+        setHistorialError(null);
+        const data = await getCheckins();
+        setHistorialCheckins(data);
+        setHistorialLoaded(true);
+      } catch (err) {
+        console.error("❌ Error al cargar historial de check-ins:", err);
+        const message = err instanceof Error ? err.message : "Error desconocido";
+        setHistorialError(message);
+      } finally {
+        setHistorialCargando(false);
+      }
+    },
+    [historialCargando, historialLoaded]
+  );
 
   const updateDiaRows = (dia: string, updater: (rows: CheckRow[]) => CheckRow[]) => {
     setCheckData((prev) => {
@@ -611,55 +898,47 @@ async function addWeekToView() {
     updateDiaRows(dia, (rows) => [...rows, createEmptyCheckRow()]);
   };
 
+  useEffect(() => {
+    if (section !== "checkin") return;
+    void cargarHistorial();
+  }, [section, cargarHistorial]);
+
   function loadUserTemplate() {
-    const toRow = (arr: Array<string | undefined>): CheckRow => ({
-      nombre: "",
-      LUN: { in: arr[0] || "", out: arr[1] || "" },
-      MAR: { in: arr[2] || "", out: arr[3] || "" },
-      MIE: { in: arr[4] || "", out: arr[5] || "" },
-      JUE: { in: arr[6] || "", out: arr[7] || "" },
-      VIE: { in: arr[8] || "", out: arr[9] || "" },
-      SAB: { in: arr[10] || "", out: arr[11] || "" },
+    const select = document.getElementById("nuevo-dia") as HTMLSelectElement | null;
+    const diaSeleccionado = select?.value || "Lunes";
+    const dayKey = DAY_NAME_TO_KEY[diaSeleccionado];
+
+    if (!dayKey) {
+      alert("Selecciona un día válido para cargar la plantilla.");
+      return;
+    }
+
+    const rows: CheckRow[] = Array.from({ length: 10 }, () => {
+      const base = createEmptyCheckRow();
+      base[dayKey] = { in: "08:30", out: "18:00" };
+      return base;
     });
-    const rows: CheckRow[] = [
-      toRow(["08:30","18:00","08:30","19:00","08:30","","08:30","14:00","","",""]),
-      toRow(["08:30","18:00","08:30","18:00","08:30","","08:30","14:00","","",""]),
-      toRow(["08:30","18:00","08:30","18:00","08:30","18:00","08:30","14:00","","",""]),
-      toRow(["08:30","18:00","08:30","18:00","08:30","18:00","08:30","14:00","","",""]),
-      toRow(["08:30","18:00","08:30","18:00","08:30","18:00","08:30","14:00","","",""]),
-      toRow(["08:30","18:00","08:30","18:00","08:30","18:00","08:30","14:00","","",""]),
-      toRow(["08:30","18:00","08:30","18:00","08:30","","08:30","14:00","","",""]),
-      toRow(["08:30","18:00","08:30","18:00","08:30","","08:30","14:00","","",""]),
-      toRow(["08:30","18:00","08:30","18:00","08:30","","08:30","14:00","","",""]),
-      toRow(["08:30","18:00","08:30","18:00","08:30","","08:30","14:00","","",""]),
-      toRow(["08:30","18:00","08:30","18:00","08:30","","08:30","14:00","","",""]),
-      toRow(["08:30","18:00","08:30","18:00","08:30","18:00","08:30","14:00","","",""]),
-      toRow(["08:30","18:00","08:45","18:00","08:45","","08:30","14:00","","",""]),
-      toRow(["08:30","18:00","08:30","18:00","08:30","","08:30","14:00","","",""]),
-    ];
-    const nombresDias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
-    const data: Record<string, CheckRow[]> = {};
-    nombresDias.forEach((nombre, idx) => {
-      const key = DAY_KEYS[idx];
-      data[nombre] = rows.map((row) => ({
-        ...createEmptyCheckRow(),
-        nombre: row.nombre,
-        [key]: { ...row[key] },
-      }));
-    });
-    setDiasActivos(nombresDias);
-    setCheckData(data);
+
+    setDiasActivos([diaSeleccionado]);
+    setCheckData({ [diaSeleccionado]: rows });
+    if (select) select.value = "";
   }
 
   async function guardarCheckins(dia: string) {
     try {
+      const semana = semanaCheckin.trim();
+      if (!semana) {
+        alert("Define un título de semana antes de guardar.");
+        return;
+      }
+      const dayKey = DAY_NAME_TO_KEY[dia] ?? "LUN";
       const registros = (checkData[dia] || []).map((r) => ({
         nombre: r.nombre,
         dia,
-        horaEntrada: r.LUN.in,
-        horaSalida: r.LUN.out,
-        horasTotales: spanHours(r.LUN.in, r.LUN.out),
-        semana: "SEMANA 58",
+        horaEntrada: r[dayKey].in,
+        horaSalida: r[dayKey].out,
+        horasTotales: spanHours(r[dayKey].in, r[dayKey].out),
+        semana,
       }));
 
       if (!registros.length) {
@@ -668,6 +947,7 @@ async function addWeekToView() {
       }
 
       await createCheckins(registros);
+      await cargarHistorial(true);
       alert(`✅ Check-ins del ${dia} guardados correctamente.`);
     } catch (err) {
       console.error("❌ Error al guardar check-ins:", err);
@@ -843,6 +1123,12 @@ async function addWeekToView() {
             <div className="space-y-4">
               <div className="rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/70 dark:bg-white/5 backdrop-blur">
                 <div className="flex flex-wrap gap-2 items-center">
+                  <input
+                    className="px-3 py-2 min-w-[240px] rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-sm"
+                    placeholder='Semana (ej. "SEMANA #42 DEL 20 AL 26 OCT")'
+                    value={semanaCheckin}
+                    onChange={(e) => setSemanaCheckin(e.target.value)}
+                  />
                   <button
                     className="px-3 py-2 rounded-xl bg-gradient-to-r from-petro-red to-petro-redDark text-white text-sm shadow"
                     onClick={addCheckRow}
@@ -853,7 +1139,7 @@ async function addWeekToView() {
                     className="px-3 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-sm"
                     onClick={loadUserTemplate}
                   >
-                    Cargar plantilla (14 empleados)
+                    Cargar plantilla (Semana típica)
                   </button>
                 </div>
               </div>
@@ -1064,26 +1350,98 @@ async function addWeekToView() {
                   className="mt-3 px-4 py-2 rounded-xl bg-green-600 text-white text-sm shadow hover:bg-green-700"
                   onClick={async () => {
                     try {
-                      const res = await fetch("http://localhost:4000/api/checkins/cerrar-semana", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ semana: "SEMANA 58" }),
-                      });
-                      if (!res.ok) {
-                        const message = await res.text();
-                        throw new Error(message || `Request failed: ${res.status}`);
+                      const semana = semanaCheckin.trim();
+                      if (!semana) {
+                        alert("Indica el nombre de la semana antes de cerrar.");
+                        return;
                       }
-                      alert("✅ Semana cerrada y nóminas generadas");
+                      const resumen = await closeCheckinWeek(semana);
+                      await cargarHistorial(true);
+
+                      const payload = crearNominaDesdeResumen(resumen);
+
+                      if (!payload.empleados.length) {
+                        alert(
+                          `⚠️ Semana "${resumen.semana}" cerrada, pero no se encontraron empleados para generar nómina automática.`
+                        );
+                        return;
+                      }
+
+                      await createNomina(payload);
+                      await refrescarNominas();
+                      setSection("nominas");
+                      setSectionTitle(payload.semana);
+                      alert(
+                        [
+                          `✅ ${resumen.message}`,
+                          `Registros de check-in: ${resumen.totalRegistros}`,
+                          `Empleados en nómina: ${payload.empleados.length}`,
+                          `Total estimado: $${fmt(payload.totalGeneral)}`,
+                        ].join("\n")
+                      );
                     } catch (err) {
                       console.error("❌ Error al cerrar semana:", err);
-                      alert("No se pudo cerrar la semana. Revisa la consola.");
+                      const message = err instanceof Error ? err.message : "No se pudo cerrar la semana.";
+                      alert(`No se pudo cerrar la semana. ${message}`);
                     }
                   }}
                 >
                   🧾 Cerrar semana y generar nómina
                 </button>
               </div>
+            <div className="rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/70 dark:bg-white/5 backdrop-blur">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="font-semibold text-base md:text-lg">Historial de días registrados</h3>
+                <div className="flex items-center gap-2">
+                  {historialCargando && (
+                    <span className="text-sm opacity-70 animate-pulse">Actualizando…</span>
+                  )}
+                  <button
+                    onClick={() => cargarHistorial(true)}
+                    className="px-3 py-1.5 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-sm disabled:opacity-50"
+                    disabled={historialCargando}
+                  >
+                    🔄 Actualizar
+                  </button>
+                </div>
+              </div>
+              {historialError ? (
+                <p className="mt-3 text-sm text-red-600 dark:text-red-400">
+                  Error al cargar historial: {historialError}
+                </p>
+              ) : historialDias.length === 0 ? (
+                <p className="mt-3 text-sm opacity-70">Aún no hay check-ins registrados.</p>
+              ) : (
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left bg-petro-charcoal text-white">
+                        <th className="px-3 py-2">Fecha</th>
+                        <th className="px-3 py-2">Día</th>
+                        <th className="px-3 py-2">Semana</th>
+                        <th className="px-3 py-2 text-right">Registros</th>
+                        <th className="px-3 py-2">Empleados</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {historialDias.slice(0, HISTORIAL_MAX_FILAS).map((entry) => (
+                        <tr
+                          key={entry.key}
+                          className="border-b border-petro-line/40 last:border-0 dark:border-white/10 odd:bg-white/60 dark:odd:bg-white/5 even:bg-white/30 dark:even:bg-transparent"
+                        >
+                          <td className="px-3 py-2">{entry.fechaLabel}</td>
+                          <td className="px-3 py-2">{entry.dia}</td>
+                          <td className="px-3 py-2">{entry.semana || "—"}</td>
+                          <td className="px-3 py-2 text-right font-mono">{entry.total}</td>
+                          <td className="px-3 py-2">{resumirNombres(entry.nombres)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
+          </div>
           )}
 
           {/* ─────────────── NÓMINAS ─────────────── */}
@@ -1605,14 +1963,15 @@ async function addWeekToView() {
                             <td className="p-2">
                               <button
                                 onClick={() => setDetalleNomina(nomina)}
-                                className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm"
+                                className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                                disabled={nomina.empleados.length === 0}
                               >
-                                Ver detalles
+                                Ver detalles ({nomina.empleados.length})
                               </button>
                             </td>
 
                             <td className="p-2 text-center font-bold text-green-400">
-                              ${nomina.totalGeneral?.toFixed?.(2) ?? fmt(Number(nomina.totalGeneral ?? 0))}
+                              ${fmt(nomina.totalGeneral)}
                             </td>
                             <td className="p-2 text-gray-400">
                               {(() => {
@@ -2049,42 +2408,48 @@ async function addWeekToView() {
                   Detalles de {detalleNomina.semana}
                 </h2>
 
-                <table className="w-full border-collapse text-sm">
-                  <thead className="bg-[#A52A2A] text-gray-100">
-                    <tr>
-                      <th className="p-2 text-left">Empleado</th>
-                      <th className="p-2 text-left">Horas primarias</th>
-                      <th className="p-2 text-left">Horas extras</th>
-                      <th className="p-2 text-left">Pago base</th>
-                      <th className="p-2 text-left">Bono semanal</th>
-                      <th className="p-2 text-left">Bono mensual</th>
-                      <th className="p-2 text-left">Comisión</th>
-                      <th className="p-2 text-left">Descuentos</th>
-                      <th className="p-2 text-left text-green-400">Total final</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detalleNomina.empleados.map((e: any, i: number) => (
-                      <tr key={i} className="border-b border-gray-700 hover:bg-[#2B2B2B]">
-                        <td className="p-2 font-semibold text-amber-300">{e.nombre}</td>
-                        <td className="p-2">{e.total_horas_primarias}</td>
-                        <td className="p-2">{e.horas_extras}</td>
-                        <td className="p-2">${e.costo_hora_primaria}</td>
-                        <td className="p-2">${e.bono_semanal}</td>
-                        <td className="p-2">${e.bono_mensual}</td>
-                        <td className="p-2">${e.comision}</td>
-                        <td className="p-2 text-red-400">-${e.descuentos}</td>
-                        <td className="p-2 font-bold text-green-400">${e.total_final}</td>
+                {Array.isArray(detalleNomina.empleados) && detalleNomina.empleados.length > 0 ? (
+                  <table className="w-full border-collapse text-sm">
+                    <thead className="bg-[#A52A2A] text-gray-100">
+                      <tr>
+                        <th className="p-2 text-left">Empleado</th>
+                        <th className="p-2 text-left">Horas primarias</th>
+                        <th className="p-2 text-left">Horas extras</th>
+                        <th className="p-2 text-left">Pago base</th>
+                        <th className="p-2 text-left">Bono semanal</th>
+                        <th className="p-2 text-left">Bono mensual</th>
+                        <th className="p-2 text-left">Comisión</th>
+                        <th className="p-2 text-left">Descuentos</th>
+                        <th className="p-2 text-left text-green-400">Total final</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {detalleNomina.empleados.map((e: NominaEmpleado, i: number) => (
+                        <tr key={i} className="border-b border-gray-700 hover:bg-[#2B2B2B]">
+                          <td className="p-2 font-semibold text-amber-300">{e.nombre ?? "Sin nombre"}</td>
+                          <td className="p-2">{fmt(Number(e.total_horas_primarias ?? 0))}</td>
+                          <td className="p-2">{fmt(Number(e.horas_extras ?? 0))}</td>
+                          <td className="p-2">${fmt(Number(e.costo_hora_primaria ?? 0))}</td>
+                          <td className="p-2">${fmt(Number(e.bono_semanal ?? 0))}</td>
+                          <td className="p-2">${fmt(Number(e.bono_mensual ?? 0))}</td>
+                          <td className="p-2">${fmt(Number(e.comision ?? e.comisiones ?? 0))}</td>
+                          <td className="p-2 text-red-400">-${fmt(Number(e.descuentos ?? 0))}</td>
+                          <td className="p-2 font-bold text-green-400">${fmt(Number(e.total_final ?? 0))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <p className="text-sm text-white/80">
+                    Esta nómina no incluye empleados para mostrar.
+                  </p>
+                )}
 
                 <div className="mt-6 flex justify-between items-center border-t border-gray-700 pt-4">
                   <p className="text-lg font-semibold text-gray-300">
                     Total general:&nbsp;
                     <span className="text-green-400">
-                      ${detalleNomina.totalGeneral.toFixed(2)}
+                      ${fmt(Number(detalleNomina.totalGeneral ?? 0))}
                     </span>
                   </p>
                   <button

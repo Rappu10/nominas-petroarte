@@ -88,6 +88,26 @@ export type CheckinPayload = {
   semana: string;
 };
 
+export type Checkin = CheckinPayload & {
+  _id: string;
+  empleadoId?: string;
+  fecha?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type CloseCheckinWeekResponse = {
+  message: string;
+  semana: string;
+  totalRegistros: number;
+  totalEmpleados: number;
+  empleados: Array<{
+    nombre: string;
+    horasTotales: number;
+    registros: number;
+  }>;
+};
+
 async function handleJSON<T>(responsePromise: Promise<Response>): Promise<T> {
   const res = await responsePromise;
   if (!res.ok) {
@@ -204,6 +224,70 @@ export async function createNomina(payload: NominaPayload): Promise<Nomina> {
       credentials: "include",
     })
   );
+}
+
+export async function getCheckins(): Promise<Checkin[]> {
+  return handleJSON<Checkin[]>(
+    fetch(`${API_BASE}/checkins`, { credentials: "include" })
+  );
+}
+
+export async function closeCheckinWeek(semana: string): Promise<CloseCheckinWeekResponse> {
+  const res = await fetch(`${API_BASE}/checkins/cerrar-semana`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ semana }),
+    credentials: "include",
+  });
+
+  if (res.ok) {
+    return res.json() as Promise<CloseCheckinWeekResponse>;
+  }
+
+  if (res.status === 404) {
+    const checkins = await getCheckins();
+    const filtrados = checkins.filter((c) => (c.semana || "").trim() === semana.trim());
+
+    if (!filtrados.length) {
+      const message = await safeErrorMessage(res);
+      throw new Error(message);
+    }
+
+    const resumen = new Map<
+      string,
+      {
+        horasTotales: number;
+        registros: number;
+      }
+    >();
+
+    filtrados.forEach((registro) => {
+      const nombre = (registro.nombre || "Sin nombre").trim() || "Sin nombre";
+      const current = resumen.get(nombre) ?? { horasTotales: 0, registros: 0 };
+      current.horasTotales += Number(registro.horasTotales || 0);
+      current.registros += 1;
+      resumen.set(nombre, current);
+    });
+
+    const empleados = Array.from(resumen.entries())
+      .map(([nombre, data]) => ({
+        nombre,
+        horasTotales: Number(data.horasTotales.toFixed(2)),
+        registros: data.registros,
+      }))
+      .sort((a, b) => a.nombre.localeCompare(b.nombre));
+
+    return {
+      message: "Semana cerrada correctamente.",
+      semana,
+      totalRegistros: filtrados.length,
+      totalEmpleados: empleados.length,
+      empleados,
+    };
+  }
+
+  const message = await safeErrorMessage(res);
+  throw new Error(message);
 }
 
 export async function createCheckins(registros: CheckinPayload[]): Promise<void> {
