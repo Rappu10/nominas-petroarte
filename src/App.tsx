@@ -2157,7 +2157,6 @@ export default function App() {
                           <th className="p-2 text-right">Descuento</th>
                           <th className="p-2 text-center">Total general</th>
                           <th className="p-2 text-left">Fecha</th>
-                          <th className="p-2 text-right">Acciones</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2176,13 +2175,46 @@ export default function App() {
                               <td className="p-2 font-semibold">{nomina.semana}</td>
 
                               <td className="p-2">
-                                <button
-                                  onClick={() => setDetalleNomina(nomina)}
-                                  className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm disabled:opacity-60 disabled:cursor-not-allowed"
-                                  disabled={nomina.empleados.length === 0}
-                                >
-                                  Ver detalles ({nomina.empleados.length})
-                                </button>
+                                <div className="flex flex-col gap-1.5">
+                                  <div className="text-xs text-white/60">
+                                    {nomina.empleados.length > 0
+                                      ? resumirNombres(
+                                          nomina.empleados
+                                            .map((emp) => String(emp.nombre ?? "").trim())
+                                            .filter(Boolean)
+                                        )
+                                      : "Sin empleados registrados"}
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    <button
+                                      onClick={() => setDetalleNomina(nomina)}
+                                      className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs md:text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                                      disabled={nomina.empleados.length === 0}
+                                    >
+                                      👁️ Ver detalles
+                                    </button>
+                                    <button
+                                      onClick={() => abrirEditorNominaSemanaObjetivo(nomina)}
+                                      className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs transition disabled:opacity-60 disabled:cursor-not-allowed"
+                                      disabled={nomina.empleados.length === 0}
+                                    >
+                                      ✏️ Editar semana
+                                    </button>
+                                    <button
+                                      onClick={() => eliminarNominaSemana(nomina.semana ?? "")}
+                                      className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs transition disabled:opacity-60 disabled:cursor-not-allowed"
+                                      disabled={
+                                        deleteNominaLoading &&
+                                        deleteSemanaTarget === (nomina.semana ?? "")
+                                      }
+                                    >
+                                      {deleteNominaLoading &&
+                                      deleteSemanaTarget === (nomina.semana ?? "")
+                                        ? "Eliminando…"
+                                        : "🗑️ Eliminar"}
+                                    </button>
+                                  </div>
+                                </div>
                               </td>
 
                               <td className="p-2 text-right">
@@ -2212,30 +2244,6 @@ export default function App() {
                                   const fecha = nomina.fechaRegistro || nomina.createdAt;
                                   return fecha ? new Date(fecha).toLocaleDateString() : "Sin fecha";
                                 })()}
-                              </td>
-                              <td className="p-2">
-                                <div className="flex flex-wrap justify-end gap-2">
-                                  <button
-                                    onClick={() => abrirEditorNominaSemanaObjetivo(nomina)}
-                                    className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs transition disabled:opacity-60 disabled:cursor-not-allowed"
-                                    disabled={nomina.empleados.length === 0}
-                                  >
-                                    Editar
-                                  </button>
-                                  <button
-                                    onClick={() => eliminarNominaSemana(nomina.semana ?? "")}
-                                    className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs transition disabled:opacity-60 disabled:cursor-not-allowed"
-                                    disabled={
-                                      deleteNominaLoading &&
-                                      deleteSemanaTarget === (nomina.semana ?? "")
-                                    }
-                                  >
-                                    {deleteNominaLoading &&
-                                    deleteSemanaTarget === (nomina.semana ?? "")
-                                      ? "Eliminando…"
-                                      : "Eliminar"}
-                                  </button>
-                                </div>
                               </td>
                             </tr>
                           );
