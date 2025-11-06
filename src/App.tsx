@@ -887,6 +887,17 @@ export default function App() {
     return map;
   }, [rawData]);
 
+  const empleadosHistorialNominas = useMemo(() => {
+    const set = new Set<string>();
+    nominasGuardadas.forEach((nomina) => {
+      (nomina.empleados ?? []).forEach((emp) => {
+        const nombre = String(emp.nombre ?? "").trim();
+        if (nombre) set.add(nombre);
+      });
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [nominasGuardadas]);
+
   const semanasDisponiblesNomina = useMemo(() => {
     return Array.from(nominasPorSemana.keys())
       .filter((sem) => sem && sem.length > 0)
@@ -1875,6 +1886,23 @@ export default function App() {
                   <p className="text-sm opacity-70">Aún no has guardado nóminas.</p>
                 ) : (
                   <div className="overflow-x-auto">
+                    <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+                      <span className="inline-flex items-center gap-2 rounded-full bg-white/20 dark:bg-white/10 px-3 py-1 font-medium text-white">
+                        Empleados únicos en historial: {empleadosHistorialNominas.length}
+                      </span>
+                      {empleadosHistorialNominas.length > 0 && (
+                        <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto text-[11px] text-white/80">
+                          {empleadosHistorialNominas.map((nombre) => (
+                            <span
+                              key={nombre}
+                              className="inline-flex items-center rounded-full border border-white/20 px-2 py-[2px]"
+                            >
+                              {nombre}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                     <table className="w-full border-collapse text-sm bg-[#1b1b1b] rounded-xl overflow-hidden">
                       <thead>
                         <tr className="bg-petro-red text-white">
