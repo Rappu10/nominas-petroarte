@@ -1,4 +1,7 @@
-const API_BASE = "https://petroarte-backend-1.onrender.com/api";
+const RAW_API_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
+const DEFAULT_API_URL = "https://petroarte-backend-1.onrender.com";
+const NORMALIZED_API_URL = (RAW_API_URL && RAW_API_URL.length > 0 ? RAW_API_URL : DEFAULT_API_URL).replace(/\/$/, "");
+const API_BASE = `${NORMALIZED_API_URL}/api`;
 
 export type Estatus = "Activo" | "Baja";
 export type TipoPago = "Por horas" | "Semanal fijo";

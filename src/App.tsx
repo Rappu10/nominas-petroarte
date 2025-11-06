@@ -887,16 +887,30 @@ export default function App() {
     return map;
   }, [rawData]);
 
+  const [filtroHistorialNominas, setFiltroHistorialNominas] = useState("");
+
+  const nominasFiltradas = useMemo(() => {
+    if (!filtroHistorialNominas.trim()) return nominasGuardadas;
+    const needle = filtroHistorialNominas.trim().toLowerCase();
+    return nominasGuardadas.filter((nomina) => {
+      const coincideSemana = nomina.semana?.toLowerCase().includes(needle);
+      const coincideEmpleado = (nomina.empleados ?? []).some((emp) =>
+        String(emp.nombre ?? "").toLowerCase().includes(needle)
+      );
+      return coincideSemana || coincideEmpleado;
+    });
+  }, [nominasGuardadas, filtroHistorialNominas]);
+
   const empleadosHistorialNominas = useMemo(() => {
     const set = new Set<string>();
-    nominasGuardadas.forEach((nomina) => {
+    (nominasFiltradas as NominaSemana[]).forEach((nomina) => {
       (nomina.empleados ?? []).forEach((emp) => {
         const nombre = String(emp.nombre ?? "").trim();
         if (nombre) set.add(nombre);
       });
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [nominasGuardadas]);
+  }, [nominasFiltradas]);
 
   const semanasDisponiblesNomina = useMemo(() => {
     return Array.from(nominasPorSemana.keys())
@@ -1879,9 +1893,26 @@ export default function App() {
                     <p className="text-sm opacity-70">Revisa los empleados capturados en cada semana.</p>
                   </div>
                   <span className="text-xs opacity-60">
-                    {nominasGuardadas.length.toLocaleString()} registros
+                    {nominasFiltradas.length.toLocaleString()} semanas listadas
                   </span>
                 </header>
+                <div className="flex flex-wrap items-center gap-2 mb-4">
+                  <input
+                    className="px-3 py-2 w-full md:w-72 rounded-xl bg-white/15 dark:bg-white/10 border border-white/15 text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/40"
+                    placeholder="Filtrar por semana o empleado…"
+                    value={filtroHistorialNominas}
+                    onChange={(e) => setFiltroHistorialNominas(e.target.value)}
+                  />
+                  {filtroHistorialNominas && (
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 rounded-lg bg-white/10 border border-white/20 text-xs"
+                      onClick={() => setFiltroHistorialNominas("")}
+                    >
+                      Limpiar filtro
+                    </button>
+                  )}
+                </div>
                 {nominasGuardadas.length === 0 ? (
                   <p className="text-sm opacity-70">Aún no has guardado nóminas.</p>
                 ) : (
@@ -1903,41 +1934,72 @@ export default function App() {
                         </div>
                       )}
                     </div>
-                    <table className="w-full border-collapse text-sm bg-[#1b1b1b] rounded-xl overflow-hidden">
+                    <table className="w-full border-collapse text-sm bg-[#1b1b1b] rounded-xl overflow-hidden min-w-[760px]">
                       <thead>
                         <tr className="bg-petro-red text-white">
                           <th className="p-2 text-left">Semana</th>
                           <th className="p-2 text-left">Empleados</th>
+                          <th className="p-2 text-right">Descuento</th>
                           <th className="p-2 text-center">Total general</th>
                           <th className="p-2 text-left">Fecha</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {nominasGuardadas.map((nomina, index) => (
-                          <tr key={index} className="border-t border-gray-700 hover:bg-[#2B2B2B]">
-                            <td className="p-2 font-semibold">{nomina.semana}</td>
+                        {nominasFiltradas.map((nomina, index) => {
+                          const totalDescuento = (nomina.empleados ?? []).reduce(
+                            (acc, emp) => acc + safeNumber(emp.descuentos),
+                            0
+                          );
+                          const totalPendiente = (nomina.empleados ?? []).reduce(
+                            (acc, emp) => acc + safeNumber(emp.pendiente_descuento),
+                            0
+                          );
+                          const netoEstimado = round2(safeNumber(nomina.totalGeneral) - totalDescuento);
+                          return (
+                            <tr key={index} className="border-t border-gray-700 hover:bg-[#2B2B2B]">
+                              <td className="p-2 font-semibold">{nomina.semana}</td>
 
-                            <td className="p-2">
-                              <button
-                                onClick={() => setDetalleNomina(nomina)}
-                                className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm disabled:opacity-60 disabled:cursor-not-allowed"
-                                disabled={nomina.empleados.length === 0}
-                              >
-                                Ver detalles ({nomina.empleados.length})
-                              </button>
-                            </td>
+                              <td className="p-2">
+                                <button
+                                  onClick={() => setDetalleNomina(nomina)}
+                                  className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                                  disabled={nomina.empleados.length === 0}
+                                >
+                                  Ver detalles ({nomina.empleados.length})
+                                </button>
+                              </td>
 
-                            <td className="p-2 text-center font-bold text-green-400">
-                              ${fmt(nomina.totalGeneral)}
-                            </td>
-                            <td className="p-2 text-gray-400">
-                              {(() => {
-                                const fecha = nomina.fechaRegistro || nomina.createdAt;
-                                return fecha ? new Date(fecha).toLocaleDateString() : "Sin fecha";
-                              })()}
-                            </td>
-                          </tr>
-                        ))}
+                              <td className="p-2 text-right">
+                                {totalDescuento > 0 ? (
+                                  <div className="inline-flex flex-col items-end rounded-lg bg-emerald-500/15 px-2 py-1 text-xs text-emerald-300 border border-emerald-500/30">
+                                    <span>-${fmt(totalDescuento)}</span>
+                                    {totalPendiente > 0 && (
+                                      <span className="text-[11px] opacity-80">Pendiente ${fmt(totalPendiente)}</span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-xs opacity-50">—</span>
+                                )}
+                              </td>
+                              <td className="p-2 text-center font-bold text-green-400">
+                                <div className="flex flex-col items-center">
+                                  <span>${fmt(nomina.totalGeneral)}</span>
+                                  {totalDescuento > 0 && (
+                                    <span className="text-[11px] text-emerald-200">
+                                      Neto: ${fmt(netoEstimado)}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="p-2 text-gray-400">
+                                {(() => {
+                                  const fecha = nomina.fechaRegistro || nomina.createdAt;
+                                  return fecha ? new Date(fecha).toLocaleDateString() : "Sin fecha";
+                                })()}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
