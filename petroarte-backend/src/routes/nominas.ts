@@ -63,14 +63,40 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { descuentos, pendiente_descuento } = req.body ?? {};
+    const body = (req.body ?? {}) as Record<string, unknown>;
 
-    const update: Record<string, unknown> = {};
-    if (descuentos !== undefined) update.descuentos = descuentos;
-    if (pendiente_descuento !== undefined) update.pendiente_descuento = pendiente_descuento;
+    const editableFields = [
+      "total_horas",
+      "horas_primarias",
+      "horas_extras",
+      "pago_semanal_base",
+      "costo_hora_primaria",
+      "total_horas_primarias",
+      "pago_horas_primarias",
+      "costo_hora_extra",
+      "pago_horas_extras",
+      "pago_semanal_calc",
+      "descuentos",
+      "pendiente_descuento",
+      "total",
+      "bono_semanal",
+      "total_2",
+      "bono_mensual",
+      "comision",
+      "total_con_bono_mensual",
+      "extra",
+      "total_final",
+      "semana",
+    ] as const;
+
+    const update = Object.fromEntries(
+      editableFields
+        .filter((field) => field in body)
+        .map((field) => [field, body[field]])
+    );
 
     if (Object.keys(update).length === 0) {
-      return res.status(400).json({ error: "No se proporcionaron campos para actualizar" });
+      return res.status(400).json({ error: "No se proporcionaron campos válidos para actualizar" });
     }
 
     const updated = await Nomina.findByIdAndUpdate(id, update, { new: true });
@@ -85,12 +111,45 @@ router.put("/:id", async (req, res) => {
 });
 
 // Eliminar todas las nóminas (opcional, útil para limpiar)
-router.delete("/all", async (req, res) => {
+router.delete("/all", async (_req, res) => {
   try {
     await Nomina.deleteMany({});
     res.json({ message: "Todas las nóminas eliminadas" });
   } catch (err) {
     res.status(500).json({ error: "Error al eliminar nóminas" });
+  }
+});
+
+// Eliminar todas las nóminas de una semana específica
+router.delete("/semana/:semana", async (req, res) => {
+  try {
+    const { semana } = req.params;
+    if (!semana || !semana.trim()) {
+      return res.status(400).json({ error: "Semana inválida" });
+    }
+    const resultado = await Nomina.deleteMany({ semana });
+    res.json({
+      message: "Nóminas eliminadas",
+      deletedCount: resultado.deletedCount ?? 0,
+    });
+  } catch (err) {
+    console.error("❌ Error al eliminar nóminas por semana:", err);
+    res.status(500).json({ error: "Error al eliminar nóminas por semana" });
+  }
+});
+
+// Eliminar una nómina específica
+router.delete("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const eliminada = await Nomina.findByIdAndDelete(id);
+    if (!eliminada) {
+      return res.status(404).json({ error: "Nómina no encontrada" });
+    }
+    res.json({ message: "Nómina eliminada" });
+  } catch (err) {
+    console.error("❌ Error al eliminar nómina:", err);
+    res.status(500).json({ error: "Error al eliminar nómina" });
   }
 });
 

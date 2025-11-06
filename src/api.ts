@@ -249,6 +249,29 @@ export async function updateNomina(id: string, data: NominaUpdatePayload): Promi
   );
 }
 
+export async function deleteNomina(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/nominas/${id}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const message = await safeErrorMessage(res);
+    throw new Error(message);
+  }
+}
+
+export async function deleteNominasBySemana(semana: string): Promise<void> {
+  const normalized = encodeURIComponent(semana);
+  const res = await fetch(`${API_BASE}/nominas/semana/${normalized}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const message = await safeErrorMessage(res);
+    throw new Error(message);
+  }
+}
+
 export async function getCheckins(): Promise<Checkin[]> {
   return handleJSON<Checkin[]>(
     fetch(`${API_BASE}/checkins`, { credentials: "include" })

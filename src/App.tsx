@@ -9,6 +9,7 @@ import {
   deletePrestamo,
   createNomina,
   updateNomina,
+  deleteNominasBySemana,
   getNominas,
   createCheckins,
   getCheckins,
@@ -43,6 +44,18 @@ type NominaSemana = {
   totalGeneral: number;
   createdAt?: string;
   fechaRegistro?: string;
+};
+
+type EditableNominaRow = {
+  _id?: string;
+  nombre: string;
+  pago_semanal_calc: string;
+  bono_semanal: string;
+  bono_mensual: string;
+  comision: string;
+  descuentos: string;
+  pendiente_descuento: string;
+  total_final: string;
 };
 
 /* ───── Utilidades ─────────────────────────────────────────────── */
@@ -114,6 +127,12 @@ function pickNumber(...values: unknown[]): number {
     }
   }
   return 0;
+}
+
+function extraerComision(registro: NominaRegistro): number {
+  const asRecord = registro as Record<string, unknown>;
+  const raw = asRecord.comision ?? asRecord.comisiones ?? 0;
+  return safeNumber(raw);
 }
 
 function agruparNominasPorSemana(registros: NominaRegistro[]): NominaSemana[] {
@@ -211,6 +230,12 @@ export default function App() {
   const [rawData, setRawData] = useState<Row[]>([]);
   const [nominasGuardadas, setNominasGuardadas] = useState<NominaSemana[]>([]);
   const [detalleNomina, setDetalleNomina] = useState<NominaSemana | null>(null);
+  const [editNominaSemana, setEditNominaSemana] = useState<string | null>(null);
+  const [editNominaOriginal, setEditNominaOriginal] = useState<NominaRegistro[]>([]);
+  const [editNominaRows, setEditNominaRows] = useState<EditableNominaRow[]>([]);
+  const [editNominaSaving, setEditNominaSaving] = useState(false);
+  const [deleteNominaLoading, setDeleteNominaLoading] = useState(false);
+  const [deleteSemanaTarget, setDeleteSemanaTarget] = useState<string | null>(null);
   const [semanaCheckin, setSemanaCheckin] = useState<string>("");
   const [semanaNomina, setSemanaNomina] = useState<string>("");
   const [semanaNominaTouched, setSemanaNominaTouched] = useState(false);
@@ -887,6 +912,73 @@ export default function App() {
     return map;
   }, [rawData]);
 
+  useEffect(() => {
+    if (!editNominaSemana) {
+      setEditNominaOriginal([]);
+      setEditNominaRows([]);
+      return;
+    }
+    const registros = nominasPorSemana.get(editNominaSemana) ?? [];
+    if (!registros.length) {
+      setEditNominaOriginal([]);
+      setEditNominaRows([]);
+      return;
+    }
+    const toInput = (value: unknown) => {
+      const normalized = round2(safeNumber(value));
+      return Number.isFinite(normalized) ? String(normalized) : "0";
+    };
+    setEditNominaOriginal(registros);
+    setEditNominaRows(
+      registros.map((registro) => ({
+        _id: registro._id,
+        nombre: String(registro.nombre ?? ""),
+        pago_semanal_calc: toInput(
+          registro.pago_semanal_calc ?? registro.total_final ?? registro.total ?? 0
+        ),
+        bono_semanal: toInput(registro.bono_semanal ?? 0),
+        bono_mensual: toInput(registro.bono_mensual ?? 0),
+        comision: toInput(extraerComision(registro)),
+        descuentos: toInput(registro.descuentos ?? 0),
+        pendiente_descuento: toInput(registro.pendiente_descuento ?? 0),
+        total_final: toInput(registro.total_final ?? registro.pago_semanal_calc ?? 0),
+      }))
+    );
+  }, [editNominaSemana, nominasPorSemana]);
+
+  useEffect(() => {
+    if (!editNominaSemana) return;
+    const original = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = original;
+    };
+  }, [editNominaSemana]);
+
+  const editNominaTotalOriginal = useMemo(() => {
+    if (!editNominaOriginal.length) return 0;
+    return round2(
+      editNominaOriginal.reduce(
+        (acc, registro) =>
+          acc +
+          safeNumber(
+            registro.total_final ?? registro.pago_semanal_calc ?? registro.total ?? 0
+          ),
+        0
+      )
+    );
+  }, [editNominaOriginal]);
+
+  const editNominaTotalPreview = useMemo(() => {
+    if (!editNominaRows.length) return 0;
+    return round2(
+      editNominaRows.reduce(
+        (acc, row) => acc + safeNumber(row.total_final || row.pago_semanal_calc),
+        0
+      )
+    );
+  }, [editNominaRows]);
+
   const [filtroHistorialNominas, setFiltroHistorialNominas] = useState("");
 
   const nominasFiltradas = useMemo(() => {
@@ -983,6 +1075,129 @@ export default function App() {
     return restantes > 0
       ? `${visibles.join(", ")} y ${restantes} más`
       : visibles.join(", ");
+  }
+
+  function abrirEditorNominaSemanaObjetivo(nomina: NominaSemana) {
+    const semana = (nomina.semana ?? "").trim();
+    if (!semana) {
+      alert("No se puede editar una nómina sin semana identificada.");
+      return;
+    }
+    const registros = nominasPorSemana.get(semana) ?? [];
+    if (!registros.length) {
+      alert("No se encontraron registros asociados a esta semana.");
+      return;
+    }
+    setEditNominaSemana(semana);
+  }
+
+  function cerrarEditorNomina() {
+    setEditNominaRows([]);
+    setEditNominaOriginal([]);
+    setEditNominaSemana(null);
+  }
+
+  function actualizarFilaNomina(index: number, campo: keyof EditableNominaRow, valor: string) {
+    setEditNominaRows((prev) =>
+      prev.map((row, idx) => (idx === index ? { ...row, [campo]: valor } : row))
+    );
+  }
+
+  function parseEditableNumber(valor: string): number {
+    if (!valor) return 0;
+    const normalizado = valor.replace(",", ".");
+    const numero = Number(normalizado);
+    return Number.isFinite(numero) ? numero : 0;
+  }
+
+  async function guardarEdicionNominaSemana() {
+    if (!editNominaSemana) return;
+    if (!editNominaOriginal.length || editNominaOriginal.length !== editNominaRows.length) {
+      alert("No hay datos válidos para guardar.");
+      return;
+    }
+    try {
+      setEditNominaSaving(true);
+      const actualizados = editNominaOriginal.map((registro, index) => {
+        const draft = editNominaRows[index];
+        const pagoCalc = round2(parseEditableNumber(draft.pago_semanal_calc));
+        const totalFinal = round2(
+          parseEditableNumber(draft.total_final || draft.pago_semanal_calc)
+        );
+        const descuentos = round2(parseEditableNumber(draft.descuentos));
+        const pendiente = round2(parseEditableNumber(draft.pendiente_descuento));
+        const bonoSemanal = round2(parseEditableNumber(draft.bono_semanal));
+        const bonoMensual = round2(parseEditableNumber(draft.bono_mensual));
+        const comision = round2(parseEditableNumber(draft.comision));
+        return {
+          ...registro,
+          pago_semanal_calc: pagoCalc,
+          total_final: totalFinal,
+          total: totalFinal,
+          descuentos,
+          pendiente_descuento: pendiente,
+          bono_semanal: bonoSemanal,
+          bono_mensual: bonoMensual,
+          comision,
+          comisiones: comision,
+        };
+      });
+
+      const totalGeneral = round2(
+        actualizados.reduce(
+          (acc, registro) =>
+            acc +
+            safeNumber(
+              registro.total_final ?? registro.pago_semanal_calc ?? registro.total ?? 0
+            ),
+          0
+        )
+      );
+
+      await createNomina({
+        semana: editNominaSemana,
+        empleados: actualizados,
+        totalGeneral,
+      });
+      await refrescarNominas();
+      alert("✅ Nómina actualizada");
+      cerrarEditorNomina();
+    } catch (err) {
+      console.error("❌ Error al actualizar nómina:", err);
+      alert("No se pudo actualizar la nómina. Revisa la consola para más detalles.");
+    } finally {
+      setEditNominaSaving(false);
+    }
+  }
+
+  async function eliminarNominaSemana(semana: string) {
+    const normalizada = (semana ?? "").trim();
+    if (!normalizada) {
+      alert("Semana inválida. No se puede eliminar la nómina.");
+      return;
+    }
+    if (typeof window !== "undefined") {
+      const confirmada = window.confirm(
+        `¿Eliminar todas las nóminas guardadas para "${normalizada}"? Esta acción no se puede deshacer.`
+      );
+      if (!confirmada) return;
+    }
+    try {
+      setDeleteNominaLoading(true);
+      setDeleteSemanaTarget(normalizada);
+      await deleteNominasBySemana(normalizada);
+      await refrescarNominas();
+      alert(`✅ Nómina de "${normalizada}" eliminada.`);
+      if (editNominaSemana === normalizada) {
+        cerrarEditorNomina();
+      }
+    } catch (err) {
+      console.error("❌ Error al eliminar nómina:", err);
+      alert("No se pudo eliminar la nómina. Revisa la consola para más detalles.");
+    } finally {
+      setDeleteNominaLoading(false);
+      setDeleteSemanaTarget(null);
+    }
   }
 
   const cargarHistorial = useCallback(
@@ -1942,6 +2157,7 @@ export default function App() {
                           <th className="p-2 text-right">Descuento</th>
                           <th className="p-2 text-center">Total general</th>
                           <th className="p-2 text-left">Fecha</th>
+                          <th className="p-2 text-right">Acciones</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1997,6 +2213,30 @@ export default function App() {
                                   return fecha ? new Date(fecha).toLocaleDateString() : "Sin fecha";
                                 })()}
                               </td>
+                              <td className="p-2">
+                                <div className="flex flex-wrap justify-end gap-2">
+                                  <button
+                                    onClick={() => abrirEditorNominaSemanaObjetivo(nomina)}
+                                    className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs transition disabled:opacity-60 disabled:cursor-not-allowed"
+                                    disabled={nomina.empleados.length === 0}
+                                  >
+                                    Editar
+                                  </button>
+                                  <button
+                                    onClick={() => eliminarNominaSemana(nomina.semana ?? "")}
+                                    className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs transition disabled:opacity-60 disabled:cursor-not-allowed"
+                                    disabled={
+                                      deleteNominaLoading &&
+                                      deleteSemanaTarget === (nomina.semana ?? "")
+                                    }
+                                  >
+                                    {deleteNominaLoading &&
+                                    deleteSemanaTarget === (nomina.semana ?? "")
+                                      ? "Eliminando…"
+                                      : "Eliminar"}
+                                  </button>
+                                </div>
+                              </td>
                             </tr>
                           );
                         })}
@@ -2005,6 +2245,184 @@ export default function App() {
                   </div>
                 )}
               </section>
+              {editNominaSemana && (
+                <>
+                  <div
+                    className="fixed inset-0 z-[82] bg-black/65 backdrop-blur-sm"
+                    onClick={cerrarEditorNomina}
+                    aria-hidden="true"
+                  />
+                  <div className="fixed inset-0 z-[95] flex items-center justify-center px-4 py-8">
+                    <div className="w-full max-w-5xl rounded-3xl shadow-2xl ring-1 ring-white/10 bg-[#0F1116]/95 text-white overflow-hidden">
+                      <header className="flex items-center justify-between gap-4 px-6 py-4 border-b border-white/10">
+                        <div>
+                          <h3 className="text-xl font-semibold">
+                            Editar nómina · {editNominaSemana}
+                          </h3>
+                          <p className="text-xs text-white/60">
+                            Ajusta montos finales, bonos y descuentos para cada colaborador.
+                          </p>
+                        </div>
+                        <button
+                          onClick={cerrarEditorNomina}
+                          className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition text-sm"
+                        >
+                          Cerrar
+                        </button>
+                      </header>
+
+                      <div className="px-6 py-3 flex flex-wrap gap-3 text-xs sm:text-sm text-white/80">
+                        <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1">
+                          Total original: <strong className="font-mono text-white">{fmt(editNominaTotalOriginal)}</strong>
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1">
+                          Total con cambios:{" "}
+                          <strong className="font-mono text-green-300">
+                            {fmt(editNominaTotalPreview)}
+                          </strong>
+                        </span>
+                      </div>
+
+                      <div className="px-6 pb-4 max-h-[60vh] overflow-auto">
+                        {editNominaRows.length === 0 ? (
+                          <p className="text-sm text-white/60">
+                            No se encontraron empleados para esta semana.
+                          </p>
+                        ) : (
+                          <table className="w-full text-xs sm:text-sm border-collapse min-w-[720px]">
+                            <thead>
+                              <tr className="bg-[#1D2331] text-white uppercase text-[11px] tracking-wide">
+                                <th className="px-3 py-2 text-left">Empleado</th>
+                                <th className="px-3 py-2 text-right whitespace-nowrap">Pago semanal</th>
+                                <th className="px-3 py-2 text-right whitespace-nowrap">Bono semanal</th>
+                                <th className="px-3 py-2 text-right whitespace-nowrap">Bono mensual</th>
+                                <th className="px-3 py-2 text-right whitespace-nowrap">Comisión</th>
+                                <th className="px-3 py-2 text-right whitespace-nowrap">Descuentos</th>
+                                <th className="px-3 py-2 text-right whitespace-nowrap">Pendiente</th>
+                                <th className="px-3 py-2 text-right whitespace-nowrap">Total final</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {editNominaRows.map((row, index) => (
+                                <tr
+                                  key={row._id ?? `${row.nombre}-${index}`}
+                                  className={index % 2 === 0 ? "bg-white/5" : "bg-white/10"}
+                                >
+                                  <td className="px-3 py-2 font-semibold text-white/90">
+                                    {row.nombre || "Sin nombre"}
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      className="w-full rounded-lg bg-white/10 border border-white/20 px-2 py-1 text-right focus:outline-none focus:ring-1 focus:ring-white/50"
+                                      value={row.pago_semanal_calc}
+                                      onChange={(event) =>
+                                        actualizarFilaNomina(index, "pago_semanal_calc", event.target.value)
+                                      }
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      className="w-full rounded-lg bg-white/10 border border-white/20 px-2 py-1 text-right focus:outline-none focus:ring-1 focus:ring-white/50"
+                                      value={row.bono_semanal}
+                                      onChange={(event) =>
+                                        actualizarFilaNomina(index, "bono_semanal", event.target.value)
+                                      }
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      className="w-full rounded-lg bg-white/10 border border-white/20 px-2 py-1 text-right focus:outline-none focus:ring-1 focus:ring-white/50"
+                                      value={row.bono_mensual}
+                                      onChange={(event) =>
+                                        actualizarFilaNomina(index, "bono_mensual", event.target.value)
+                                      }
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      className="w-full rounded-lg bg-white/10 border border-white/20 px-2 py-1 text-right focus:outline-none focus:ring-1 focus:ring-white/50"
+                                      value={row.comision}
+                                      onChange={(event) =>
+                                        actualizarFilaNomina(index, "comision", event.target.value)
+                                      }
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      className="w-full rounded-lg bg-white/10 border border-white/20 px-2 py-1 text-right focus:outline-none focus:ring-1 focus:ring-white/50"
+                                      value={row.descuentos}
+                                      onChange={(event) =>
+                                        actualizarFilaNomina(index, "descuentos", event.target.value)
+                                      }
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      className="w-full rounded-lg bg-white/10 border border-white/20 px-2 py-1 text-right focus:outline-none focus:ring-1 focus:ring-white/50"
+                                      value={row.pendiente_descuento}
+                                      onChange={(event) =>
+                                        actualizarFilaNomina(
+                                          index,
+                                          "pendiente_descuento",
+                                          event.target.value
+                                        )
+                                      }
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      className="w-full rounded-lg bg-white/10 border border-white/20 px-2 py-1 text-right focus:outline-none focus:ring-1 focus:ring-green-400"
+                                      value={row.total_final}
+                                      onChange={(event) =>
+                                        actualizarFilaNomina(index, "total_final", event.target.value)
+                                      }
+                                    />
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+
+                      <footer className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-6 py-4 border-t border-white/10">
+                        <p className="text-xs text-white/60">
+                          Los cambios se guardan para todos los empleados de la semana seleccionada.
+                        </p>
+                        <div className="flex gap-2 justify-end">
+                          <button
+                            onClick={cerrarEditorNomina}
+                            className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition text-sm"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            onClick={guardarEdicionNominaSemana}
+                            className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 transition text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+                            disabled={editNominaSaving || editNominaRows.length === 0}
+                          >
+                            {editNominaSaving ? "Guardando…" : "Guardar cambios"}
+                          </button>
+                        </div>
+                      </footer>
+                    </div>
+                  </div>
+                </>
+              )}
               {descuentoModalOpen && (
                 <>
                   <div
