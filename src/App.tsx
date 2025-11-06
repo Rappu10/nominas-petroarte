@@ -8,6 +8,7 @@ import {
   createPrestamo,
   deletePrestamo,
   createNomina,
+  updateNomina,
   getNominas,
   createCheckins,
   getCheckins,
@@ -211,8 +212,17 @@ export default function App() {
   const [nominasGuardadas, setNominasGuardadas] = useState<NominaSemana[]>([]);
   const [detalleNomina, setDetalleNomina] = useState<NominaSemana | null>(null);
   const [semanaCheckin, setSemanaCheckin] = useState<string>("");
+  const [semanaNomina, setSemanaNomina] = useState<string>("");
+  const [semanaNominaTouched, setSemanaNominaTouched] = useState(false);
   const [empleados, setEmpleados] = useState<Employee[]>([]);
   const [loadingEmpleados, setLoadingEmpleados] = useState(false);
+  const [extraEmpleado, setExtraEmpleado] = useState<Employee | null>(null);
+  const [extraForm, setExtraForm] = useState({
+    direccion: "",
+    telefono: "",
+    rfc: "",
+    curp: "",
+  });
   const refrescarNominas = useCallback(async () => {
     try {
       const data = await getNominas();
@@ -234,10 +244,14 @@ export default function App() {
   }, [refrescarNominas]);
 
   useEffect(() => {
-    if (!semanaCheckin && sectionTitle) {
+    if (!sectionTitle) return;
+    if (!semanaCheckin) {
       setSemanaCheckin(sectionTitle);
     }
-  }, [sectionTitle, semanaCheckin]);
+    if (!semanaNominaTouched && sectionTitle !== semanaNomina) {
+      setSemanaNomina(sectionTitle);
+    }
+  }, [sectionTitle, semanaCheckin, semanaNominaTouched, semanaNomina]);
 
   useEffect(() => {
     const cargar = async () => {
@@ -253,6 +267,20 @@ export default function App() {
     };
     cargar();
   }, []);
+
+  const abrirExtrasEmpleado = (emp: Employee) => {
+    setExtraEmpleado(emp);
+    setExtraForm({
+      direccion: emp.direccion || "",
+      telefono: emp.telefono || "",
+      rfc: (emp.rfc || "").toUpperCase(),
+      curp: (emp.curp || "").toUpperCase(),
+    });
+  };
+
+  const cerrarExtrasEmpleado = () => {
+    setExtraEmpleado(null);
+  };
 
   // Columnas
   const columns = useMemo(
@@ -367,28 +395,12 @@ export default function App() {
   // Columnas visibles
   const visibleCols = useMemo(() => columns.slice(0, 30), [columns]);
 
-  /* ───── Nueva semana (editor) ────────────────────────────────── */
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [semanaInput, setSemanaInput] = useState<string>("");
-
-  useEffect(() => {
-    if (!editorOpen) return;
-    if (typeof document === "undefined") return;
-    const original = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = original;
-    };
-  }, [editorOpen]);
-
-  // Auto-cálculos
-  const [autoExtra, setAutoExtra] = useState<boolean>(true);
-  const [extraMultiplier, setExtraMultiplier] = useState<number>(1.8);
-  const [autoHorasExtra, setAutoHorasExtra] = useState<boolean>(false);
-  const [extrasThreshold, setExtrasThreshold] = useState<number>(53);
+  /* ───── Configuración de cálculo de nómina ───────────────────── */
+  const extrasThreshold = 53;
+  const extraMultiplier = 1.8;
 
   const crearNominaDesdeResumen = useCallback(
-    (resumen: CloseCheckinWeekResponse): NominaPayload => {
+    (resumen: CloseCheckinWeekResponse, semanaOverride?: string): NominaPayload => {
       const empleadosNomina: NominaEmpleado[] = (resumen.empleados ?? []).map((registro) => {
         const nombre = registro.nombre?.trim() || "Sin nombre";
         const horasTotales = safeNumber(registro.horasTotales);
@@ -462,220 +474,25 @@ export default function App() {
       );
 
       return {
-        semana: resumen.semana,
+        semana: semanaOverride?.trim() || resumen.semana,
         empleados: empleadosNomina,
         totalGeneral: round2(totalGeneral),
       };
     },
-    [empleados, extrasThreshold, extraMultiplier]
+    [empleados]
   );
 
-  type Draft = {
-    nombre: string;
-    total_horas_primarias: number; // horas normales capturadas
-    horas_extras: number;
-    costo_hora_primaria: number;
-    costo_hora_extra: number;
-    bono_semanal: number;
-    bono_mensual: number;
-    comision: number;
-    descuentos: number;
-    pendiente_descuento: number;
-    pago_semanal_base: number;
-    extra?: string;
-  };
-
-  const [draftRows, setDraftRows] = useState<Draft[]>([
-    {
-      nombre: "",
-      total_horas_primarias: 0,
-      horas_extras: 0,
-      costo_hora_primaria: 0,
-      costo_hora_extra: 0,
-      bono_semanal: 0,
-      bono_mensual: 0,
-      comision: 0,
-      descuentos: 0,
-      pendiente_descuento: 0,
-      pago_semanal_base: 0,
-      extra: "",
-    },
-  ]);
-
-  const addDraftRow = () =>
-    setDraftRows((rows) => [
-      ...rows,
-      {
-        nombre: "",
-        total_horas_primarias: 0,
-        horas_extras: 0,
-        costo_hora_primaria: 0,
-        costo_hora_extra: 0,
-        bono_semanal: 0,
-        bono_mensual: 0,
-        comision: 0,
-        descuentos: 0,
-        pendiente_descuento: 0,
-        pago_semanal_base: 0,
-        extra: "",
-      },
-    ]);
-  const removeDraftRow = (idx: number) =>
-    setDraftRows((rows) => rows.filter((_, i) => i !== idx));
-
-  // Helpers para setear con autocalculo
-  function setRow<K extends keyof Draft>(idx: number, key: K, value: Draft[K]) {
-    setDraftRows((rows) =>
-      rows.map((r, i) => {
-        if (i !== idx) return r;
-        let next: Draft = { ...r, [key]: value } as Draft;
-
-        // Auto: horas extra sobre umbral
-        if (autoHorasExtra && key === "total_horas_primarias") {
-          const totalIngresado = Number(value) || 0;
-          const extras = Math.max(0, totalIngresado - extrasThreshold);
-          const prim = Math.min(totalIngresado, extrasThreshold);
-          next.total_horas_primarias = prim;
-          next.horas_extras = extras;
-        }
-
-        // Auto: costo hora extra = primaria * multiplicador
-        if (autoExtra && (key === "costo_hora_primaria" || key === "horas_extras")) {
-          const base = Number(
-            key === "costo_hora_primaria" ? value : next.costo_hora_primaria
-          );
-          if (!isNaN(base)) {
-            const calc = Math.round(base * extraMultiplier * 100) / 100;
-            next.costo_hora_extra = calc;
-          }
-        }
-        return next;
-      })
-    );
-  }
-
-  const updateDraft = <K extends keyof Draft>(
-    idx: number,
-    key: K,
-    value: Draft[K]
-  ) => setRow(idx, key, value);
-
-  function draftToRows(): NominaEmpleado[] {
-    return draftRows
-      .filter((r) => r.nombre.trim() !== "")
-      .map((r) => {
-        const pago_horas_primarias =
-          Number(r.total_horas_primarias) * Number(r.costo_hora_primaria);
-        const pago_horas_extras =
-          Number(r.horas_extras) * Number(r.costo_hora_extra);
-        const pago_semanal_calc = pago_horas_primarias + pago_horas_extras;
-        const total = pago_semanal_calc - Number(r.descuentos || 0);
-        const bonoSemanal = Number(r.bono_semanal || 0);
-        const bonoMensual = Number(r.bono_mensual || 0);
-        const comision = Number(r.comision || 0);
-        const total_2 = total + bonoSemanal;
-        const total_con_bono_mensual = total_2 + bonoMensual;
-        const total_con_comision = total_con_bono_mensual + comision;
-        const total_final = total_con_comision;
-
-        return {
-          nombre: r.nombre,
-          total_horas: Number(r.total_horas_primarias) + Number(r.horas_extras),
-          horas_primarias: 53,
-          horas_extras: Number(r.horas_extras),
-          pago_semanal_base: Number(r.pago_semanal_base || 0),
-          costo_hora_primaria: Number(r.costo_hora_primaria),
-          total_horas_primarias: Number(r.total_horas_primarias),
-          pago_horas_primarias: pago_horas_primarias,
-          costo_hora_extra: Number(r.costo_hora_extra),
-          pago_horas_extras: pago_horas_extras,
-          pago_semanal_calc: pago_semanal_calc,
-          descuentos: Number(r.descuentos || 0),
-          pendiente_descuento: Number(r.pendiente_descuento || 0),
-          total: total,
-          bono_semanal: bonoSemanal,
-          total_2: total_2,
-          bono_mensual: bonoMensual,
-          comision: comision,
-          comisiones: comision,
-          total_con_bono_mensual: total_con_bono_mensual,
-          total_con_comision: total_con_comision,
-          extra: r.extra ?? null,
-          total_final: total_final,
-        } as NominaEmpleado;
-      });
-  }
-
-async function addWeekToView() {
-  const newRows = draftToRows();
-  if (!newRows.length) {
-    alert("Agrega por lo menos un empleado con nombre.");
-    return;
-  }
-  if (!semanaInput.trim()) {
-    alert("Escribe el título de la semana.");
-    return;
-  }
-
-  const totalGeneral = newRows.reduce((a, r) => a + (r.total_final || 0), 0);
-
-  try {
-    const payload: NominaPayload = {
-      semana: semanaInput.trim(),
-      empleados: newRows,
-      totalGeneral,
-    };
-    await createNomina(payload);
-    await refrescarNominas();
-    alert("✅ Nómina guardada en MongoDB");
-  } catch (err) {
-    console.error("❌ Error al guardar nómina:", err);
-    alert("Error al guardar nómina. Ver consola.");
-  }
-
-  setEditorOpen(false);
-  setSemanaInput("");
-  setDraftRows([
-    {
-      nombre: "",
-      total_horas_primarias: 0,
-      horas_extras: 0,
-      costo_hora_primaria: 0,
-      costo_hora_extra: 0,
-      bono_semanal: 0,
-      bono_mensual: 0,
-      comision: 0,
-      descuentos: 0,
-      pendiente_descuento: 0,
-      pago_semanal_base: 0,
-      extra: "",
-    },
-  ]);
-  setPage(0);
-}
-
-  function downloadWeekJSON() {
-    const rows = draftToRows().map((r) => ({ semana: semanaInput || "", ...r }));
-    if (!rows.length) {
-      alert("No hay filas válidas para descargar.");
-      return;
-    }
-    const blob = new Blob([JSON.stringify(rows, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `nomina_${(semanaInput || "semana").replace(/\s+/g, "_")}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+  // Editor manual de nómina eliminado: se conserva lógica histórica para calcular desde check-ins.
 
   async function agregarEmpleado() {
     const nuevo: EmployeePayload = {
       nombre: "Nuevo empleado",
       puesto: "Operador",
       area: "Planta",
+      direccion: "",
+      telefono: "",
+      rfc: "",
+      curp: "",
       estatus: "Activo",
       tarifa: 50,
       extraX: 1.8,
@@ -701,7 +518,8 @@ async function addWeekToView() {
 
   async function guardarEmpleado(emp: Employee) {
     try {
-      const { _id, ...rest } = emp;
+      const current = empleados.find((e) => e._id === emp._id) ?? emp;
+      const { _id, ...rest } = current;
       const upd = await updateEmpleado(_id, rest);
       setEmpleados((prev) => prev.map((e) => (e._id === upd._id ? upd : e)));
     } catch (err) {
@@ -715,6 +533,82 @@ async function addWeekToView() {
       setEmpleados((prev) => prev.filter((e) => e._id !== id));
     } catch (err) {
       console.error("❌ Error al eliminar empleado:", err);
+    }
+  }
+
+  async function guardarExtrasEmpleado() {
+    if (!extraEmpleado) return;
+    try {
+      const clean = {
+        direccion: extraForm.direccion.trim(),
+        telefono: extraForm.telefono.trim(),
+        rfc: extraForm.rfc.trim().toUpperCase(),
+        curp: extraForm.curp.trim().toUpperCase(),
+      };
+      const { _id, ...rest } = { ...extraEmpleado, ...clean };
+      const actualizado = await updateEmpleado(extraEmpleado._id, rest);
+      setEmpleados((prev) => prev.map((e) => (e._id === actualizado._id ? actualizado : e)));
+      setExtraEmpleado(null);
+    } catch (err) {
+      console.error("❌ Error al actualizar datos extra del empleado:", err);
+      alert("No se pudieron guardar los datos extra. Revisa la consola.");
+    }
+  }
+
+  function abrirModalDescuento() {
+    setDescuentoModalOpen(true);
+  }
+
+  function cerrarModalDescuento() {
+    setDescuentoModalOpen(false);
+    setNominaObjetivoId("");
+    setDescuentoValor("");
+    setPendienteValor("");
+  }
+
+  function seleccionarNomina(id: string) {
+    setNominaObjetivoId(id);
+    const registro = nominasSemanaSeleccionada.find((n) => n._id === id);
+    if (registro) {
+      setDescuentoValor(
+        registro.descuentos !== undefined && registro.descuentos !== null
+          ? String(registro.descuentos)
+          : ""
+      );
+      setPendienteValor(
+        registro.pendiente_descuento !== undefined && registro.pendiente_descuento !== null
+          ? String(registro.pendiente_descuento)
+          : ""
+      );
+    } else {
+      setDescuentoValor("");
+      setPendienteValor("");
+    }
+  }
+
+  async function guardarDescuentoNomina() {
+    if (!nominaObjetivoId) {
+      alert("Selecciona un empleado de la nómina.");
+      return;
+    }
+    if (!Number.isFinite(descuentoPropuesto) || !Number.isFinite(pendientePropuesto)) {
+      alert("Ingresa valores numéricos válidos para descuento y pendiente.");
+      return;
+    }
+    try {
+      setGuardandoDescuento(true);
+      await updateNomina(nominaObjetivoId, {
+        descuentos: round2(descuentoPropuesto),
+        pendiente_descuento: round2(pendientePropuesto),
+      });
+      await refrescarNominas();
+      alert("✅ Descuento actualizado");
+      cerrarModalDescuento();
+    } catch (err) {
+      console.error("❌ Error al actualizar nómina:", err);
+      alert("No se pudo actualizar la nómina. Ver consola.");
+    } finally {
+      setGuardandoDescuento(false);
     }
   }
   /* ───── Préstamos (MongoDB) ───────────────────────────────────── */
@@ -850,6 +744,212 @@ async function addWeekToView() {
 
   const HISTORIAL_MAX_FILAS = 25;
 
+  const BONUS_WEEKLY_HOURS = 53;
+  const BONUS_WEEKLY_AMOUNT = 150;
+  const BONUS_MONTHLY_STREAK = 4;
+  const BONUS_MONTHLY_AMOUNT = 1600;
+
+  const resumenBonosSemana = useMemo(() => {
+    const normalizarNombre = (nombre: string) => nombre.trim().toLowerCase();
+    const displayNames = new Map<string, string>();
+
+    const currentTotals = new Map<string, number>();
+    diasActivos.forEach((dia) => {
+      const dayKey = DAY_NAME_TO_KEY[dia] ?? "LUN";
+      const rows = checkData[dia] ?? [];
+      rows.forEach((row) => {
+        const nombreRaw = row.nombre?.trim();
+        if (!nombreRaw) return;
+        const key = normalizarNombre(nombreRaw);
+        displayNames.set(key, nombreRaw);
+        const horas = spanHours(row[dayKey].in, row[dayKey].out);
+        if (horas <= 0) return;
+        currentTotals.set(key, (currentTotals.get(key) ?? 0) + horas);
+      });
+    });
+
+    const historialSemanas = new Map<
+      string,
+      { orden: number; empleados: Map<string, number> }
+    >();
+    let fallbackOrder = 0;
+
+    const obtenerOrden = (registro: Checkin): number => {
+      const dateStr = registro.fecha ?? registro.createdAt ?? registro.updatedAt;
+      if (dateStr) {
+        const parsed = Date.parse(dateStr);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+      fallbackOrder += 1;
+      return Number.MAX_SAFE_INTEGER - fallbackOrder;
+    };
+
+    historialCheckins.forEach((registro) => {
+      const semana = registro.semana?.trim();
+      const nombreRaw = registro.nombre?.trim();
+      if (!semana || !nombreRaw) return;
+      const key = normalizarNombre(nombreRaw);
+      displayNames.set(key, nombreRaw);
+      const horas = safeNumber(registro.horasTotales);
+
+      const entry = historialSemanas.get(semana);
+      if (entry) {
+        entry.empleados.set(key, (entry.empleados.get(key) ?? 0) + horas);
+        const orden = obtenerOrden(registro);
+        if (orden < entry.orden) entry.orden = orden;
+      } else {
+        historialSemanas.set(semana, {
+          orden: obtenerOrden(registro),
+          empleados: new Map([[key, horas]]),
+        });
+      }
+    });
+
+    const historialPorEmpleado = new Map<
+      string,
+      Array<{ semana: string; orden: number; horas: number; esActual?: boolean }>
+    >();
+
+    historialSemanas.forEach(({ orden, empleados }, semana) => {
+      empleados.forEach((horas, key) => {
+        const lista = historialPorEmpleado.get(key) ?? [];
+        lista.push({ semana, orden, horas });
+        historialPorEmpleado.set(key, lista);
+      });
+    });
+
+    const orderValues = Array.from(historialSemanas.values()).map((v) =>
+      Number.isFinite(v.orden) ? v.orden : 0
+    );
+    const baseOrder =
+      orderValues.length > 0 ? Math.max(...orderValues) : Date.now();
+
+    const weekLabel = semanaCheckin.trim() || "Semana en captura";
+    if (currentTotals.size > 0) {
+      const currentOrder = baseOrder + 1;
+      currentTotals.forEach((horas, key) => {
+        const lista = historialPorEmpleado.get(key) ?? [];
+        lista.push({
+          semana: weekLabel,
+          orden: currentOrder,
+          horas,
+          esActual: true,
+        });
+        historialPorEmpleado.set(key, lista);
+      });
+    }
+
+    const resultados = Array.from(currentTotals.entries()).map(
+      ([key, horas]) => {
+        const lista = historialPorEmpleado.get(key) ?? [];
+        lista.sort(
+          (a, b) => a.orden - b.orden || a.semana.localeCompare(b.semana)
+        );
+        let streak = 0;
+        for (let i = lista.length - 1; i >= 0; i--) {
+          if (safeNumber(lista[i].horas) >= BONUS_WEEKLY_HOURS) streak += 1;
+          else break;
+        }
+        const semanal = horas >= BONUS_WEEKLY_HOURS;
+        const mensual = semanal && streak >= BONUS_MONTHLY_STREAK;
+        return {
+          nombre: displayNames.get(key) ?? key,
+          horas: round2(horas),
+          semanal,
+          mensual,
+        };
+      }
+    );
+
+    resultados.sort(
+      (a, b) =>
+        safeNumber(b.horas) - safeNumber(a.horas) ||
+        a.nombre.localeCompare(b.nombre)
+    );
+    return resultados;
+  }, [diasActivos, checkData, semanaCheckin, historialCheckins]);
+
+  /* ───── Descuentos de nómina ─────────────────────────────────── */
+  const [descuentoModalOpen, setDescuentoModalOpen] = useState(false);
+  const [semanaObjetivo, setSemanaObjetivo] = useState<string>("");
+  const [nominaObjetivoId, setNominaObjetivoId] = useState<string>("");
+  const [descuentoValor, setDescuentoValor] = useState<string>("");
+  const [pendienteValor, setPendienteValor] = useState<string>("");
+  const [guardandoDescuento, setGuardandoDescuento] = useState(false);
+
+  const nominasPorSemana = useMemo(() => {
+    const map = new Map<string, NominaRegistro[]>();
+    (rawData as NominaRegistro[]).forEach((registro) => {
+      const semana = (registro.semana ?? "").trim();
+      if (!map.has(semana)) map.set(semana, []);
+      map.get(semana)!.push(registro);
+    });
+    return map;
+  }, [rawData]);
+
+  const semanasDisponiblesNomina = useMemo(() => {
+    return Array.from(nominasPorSemana.keys())
+      .filter((sem) => sem && sem.length > 0)
+      .sort((a, b) => b.localeCompare(a));
+  }, [nominasPorSemana]);
+
+  const nominasSemanaSeleccionada = useMemo(() => {
+    if (!semanaObjetivo) return [] as NominaRegistro[];
+    const lista = nominasPorSemana.get(semanaObjetivo) ?? [];
+    return [...lista]
+      .filter((n) => n._id)
+      .sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }, [nominasPorSemana, semanaObjetivo]);
+
+  const registroNominaSeleccionado = useMemo(() => {
+    if (!nominaObjetivoId) return null;
+    return nominasSemanaSeleccionada.find((n) => n._id === nominaObjetivoId) ?? null;
+  }, [nominasSemanaSeleccionada, nominaObjetivoId]);
+
+  const descuentoPropuesto = Number(descuentoValor || 0);
+  const pendientePropuesto = Number(pendienteValor || 0);
+  const descuentoAnterior = registroNominaSeleccionado ? safeNumber(registroNominaSeleccionado.descuentos) : 0;
+  const pendienteAnterior = registroNominaSeleccionado ? safeNumber(registroNominaSeleccionado.pendiente_descuento) : 0;
+  const pagoBaseNomina = registroNominaSeleccionado
+    ? safeNumber(
+        registroNominaSeleccionado.total_final ??
+          registroNominaSeleccionado.pago_semanal_calc ??
+          registroNominaSeleccionado.total ??
+          0
+      )
+    : 0;
+  const nuevoTotalEstimado =
+    registroNominaSeleccionado && Number.isFinite(descuentoPropuesto)
+      ? round2(pagoBaseNomina - descuentoPropuesto)
+      : pagoBaseNomina;
+
+  useEffect(() => {
+    if (!descuentoModalOpen) {
+      setSemanaObjetivo("");
+      setNominaObjetivoId("");
+      setDescuentoValor("");
+      setPendienteValor("");
+      return;
+    }
+    const preferida = sectionTitle || semanasDisponiblesNomina[0] || "";
+    if (preferida) {
+      setSemanaObjetivo(preferida);
+    }
+    const original = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = original;
+    };
+  }, [descuentoModalOpen, sectionTitle, semanasDisponiblesNomina]);
+
+  useEffect(() => {
+    if (!descuentoModalOpen) return;
+    setNominaObjetivoId("");
+    setDescuentoValor("");
+    setPendienteValor("");
+  }, [semanaObjetivo, descuentoModalOpen]);
+
+
   function resumirNombres(nombres: string[]): string {
     if (!nombres.length) return "—";
     const limite = 5;
@@ -905,22 +1005,22 @@ async function addWeekToView() {
 
   function loadUserTemplate() {
     const select = document.getElementById("nuevo-dia") as HTMLSelectElement | null;
-    const diaSeleccionado = select?.value || "Lunes";
-    const dayKey = DAY_NAME_TO_KEY[diaSeleccionado];
+    const diasTemplate = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+    const template: Record<string, CheckRow[]> = {};
 
-    if (!dayKey) {
-      alert("Selecciona un día válido para cargar la plantilla.");
-      return;
-    }
-
-    const rows: CheckRow[] = Array.from({ length: 10 }, () => {
-      const base = createEmptyCheckRow();
-      base[dayKey] = { in: "08:30", out: "18:00" };
-      return base;
+    const rowsPerDay = 15;
+    diasTemplate.forEach((dia) => {
+      const dayKey = DAY_NAME_TO_KEY[dia];
+      if (!dayKey) return;
+      template[dia] = Array.from({ length: rowsPerDay }, () => {
+        const base = createEmptyCheckRow();
+        base[dayKey] = { in: "08:30", out: "18:00" };
+        return base;
+      });
     });
 
-    setDiasActivos([diaSeleccionado]);
-    setCheckData({ [diaSeleccionado]: rows });
+    setDiasActivos(diasTemplate);
+    setCheckData(template);
     if (select) select.value = "";
   }
 
@@ -1127,8 +1227,35 @@ async function addWeekToView() {
                     className="px-3 py-2 min-w-[240px] rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-sm"
                     placeholder='Semana (ej. "SEMANA #42 DEL 20 AL 26 OCT")'
                     value={semanaCheckin}
-                    onChange={(e) => setSemanaCheckin(e.target.value)}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setSemanaCheckin(value);
+                      if (!semanaNominaTouched) {
+                        setSemanaNomina(value);
+                      }
+                    }}
                   />
+                  <input
+                    className="px-3 py-2 min-w-[240px] rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-sm"
+                    placeholder="Semana para nómina (puedes editarla)"
+                    value={semanaNomina}
+                    onChange={(e) => {
+                      setSemanaNominaTouched(true);
+                      setSemanaNomina(e.target.value);
+                    }}
+                    title="Define cómo se guardará el nombre de semana en nóminas"
+                  />
+                  <button
+                    className="px-3 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-sm"
+                    onClick={() => {
+                      setSemanaNominaTouched(false);
+                      setSemanaNomina(semanaCheckin);
+                    }}
+                    title="Sincronizar con el título de la semana de check-in"
+                    type="button"
+                  >
+                    Sincronizar
+                  </button>
                   <button
                     className="px-3 py-2 rounded-xl bg-gradient-to-r from-petro-red to-petro-redDark text-white text-sm shadow"
                     onClick={addCheckRow}
@@ -1237,8 +1364,16 @@ async function addWeekToView() {
                           </thead>
                           <tbody>
                             {checkData[dia]?.map((r, idx) => {
-                              const total = spanHours(r[dayKey].in, r[dayKey].out);
+                              const defaultIn = "08:30";
+                              const defaultOut = "18:00";
+                              const entrada = r[dayKey].in;
+                              const salida = r[dayKey].out;
+                              const entradaDiff = Boolean(entrada) && entrada !== defaultIn;
+                              const salidaDiff = Boolean(salida) && salida !== defaultOut;
+                              const total = spanHours(entrada, salida);
                               const empleadosList = empleados.map((e) => e.nombre);
+                              const baseInputClass =
+                                "px-2 py-1 w-24 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-center";
                               return (
                                 <tr
                                   key={idx}
@@ -1281,7 +1416,9 @@ async function addWeekToView() {
                                           return { ...prev, [dia]: rows };
                                         });
                                       }}
-                                      className="px-2 py-1 w-24 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-center"
+                                      className={`${baseInputClass} ${
+                                        entradaDiff ? "border-red-500 text-red-600 bg-red-50 dark:bg-red-500/10" : ""
+                                      }`}
                                     />
                                   </td>
                                   <td className="px-3 py-2 text-center">
@@ -1300,7 +1437,9 @@ async function addWeekToView() {
                                           return { ...prev, [dia]: rows };
                                         });
                                       }}
-                                      className="px-2 py-1 w-24 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-center"
+                                      className={`${baseInputClass} ${
+                                        salidaDiff ? "border-red-500 text-red-600 bg-red-50 dark:bg-red-500/10" : ""
+                                      }`}
                                     />
                                   </td>
                                   <td className="px-3 py-2 text-right font-mono">{fmt(total)}</td>
@@ -1355,10 +1494,11 @@ async function addWeekToView() {
                         alert("Indica el nombre de la semana antes de cerrar.");
                         return;
                       }
+                      const semanaNominaFinal = (semanaNomina || "").trim() || semana;
                       const resumen = await closeCheckinWeek(semana);
                       await cargarHistorial(true);
 
-                      const payload = crearNominaDesdeResumen(resumen);
+                      const payload = crearNominaDesdeResumen(resumen, semanaNominaFinal);
 
                       if (!payload.empleados.length) {
                         alert(
@@ -1370,7 +1510,11 @@ async function addWeekToView() {
                       await createNomina(payload);
                       await refrescarNominas();
                       setSection("nominas");
-                      setSectionTitle(payload.semana);
+                      const semanaFinal = payload.semana.trim();
+                      setSectionTitle(semanaFinal);
+                      setSemanaCheckin(semanaFinal);
+                      setSemanaNominaTouched(false);
+                      setSemanaNomina(semanaFinal);
                       alert(
                         [
                           `✅ ${resumen.message}`,
@@ -1388,6 +1532,75 @@ async function addWeekToView() {
                 >
                   🧾 Cerrar semana y generar nómina
                 </button>
+                {resumenBonosSemana.length > 0 && (
+                  <div className="mt-6 rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                      <div>
+                        <h3 className="font-semibold text-petro-redDark dark:text-petro-redLight">
+                          Bonos calculados con la semana en captura
+                        </h3>
+                        <p className="text-xs opacity-70">
+                          ✓ Bono semanal: {BONUS_WEEKLY_HOURS} h = ${BONUS_WEEKLY_AMOUNT}. Bono mensual: {BONUS_MONTHLY_STREAK} semanas continuas = ${BONUS_MONTHLY_AMOUNT}.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-4 overflow-x-auto">
+                      <table className="w-full min-w-[520px] text-sm">
+                        <thead>
+                          <tr className="bg-gradient-to-r from-petro-red to-petro-redDark text-white">
+                            <th className="px-3 py-2 text-left">Empleado</th>
+                            <th className="px-3 py-2 text-right whitespace-nowrap">Horas semana</th>
+                            <th className="px-3 py-2 text-center">Bono semanal</th>
+                            <th className="px-3 py-2 text-center">Bono mensual</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {resumenBonosSemana.map((row) => (
+                            <tr
+                              key={row.nombre}
+                              className="odd:bg-white/70 dark:odd:bg-white/10 even:bg-white/40 dark:even:bg-transparent"
+                            >
+                              <td className="px-3 py-2">{row.nombre}</td>
+                              <td className="px-3 py-2 text-right font-mono">{fmt(row.horas)}</td>
+                              <td className="px-3 py-2 text-center">
+                                <span
+                                  className={`inline-flex h-7 w-7 items-center justify-center rounded-md border text-base ${
+                                    row.semanal
+                                      ? "border-emerald-500 bg-emerald-500/20 text-emerald-600"
+                                      : "border-petro-line/60 text-slate-400 dark:border-white/15"
+                                  }`}
+                                  title={
+                                    row.semanal
+                                      ? `Cumple con ${BONUS_WEEKLY_HOURS} h y recibe $${BONUS_WEEKLY_AMOUNT}`
+                                      : `Requiere ${BONUS_WEEKLY_HOURS} h para bono semanal`
+                                  }
+                                >
+                                  {row.semanal ? "✓" : ""}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                <span
+                                  className={`inline-flex h-7 w-7 items-center justify-center rounded-md border text-base ${
+                                    row.mensual
+                                      ? "border-emerald-500 bg-emerald-500/20 text-emerald-600"
+                                      : "border-petro-line/60 text-slate-400 dark:border-white/15"
+                                  }`}
+                                  title={
+                                    row.mensual
+                                      ? `Acumula ${BONUS_MONTHLY_STREAK} semanas consecutivas de ${BONUS_WEEKLY_HOURS} h`
+                                      : `Necesita ${BONUS_MONTHLY_STREAK} semanas consecutivas con ${BONUS_WEEKLY_HOURS} h`
+                                  }
+                                >
+                                  {row.mensual ? "✓" : ""}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             <div className="rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/70 dark:bg-white/5 backdrop-blur">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1529,297 +1742,13 @@ async function addWeekToView() {
 
                   <button
                     className="px-4 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 hover:bg-white"
-                    onClick={() => setEditorOpen((v) => !v)}
+                    onClick={abrirModalDescuento}
                   >
-                    {editorOpen ? "Cerrar editor" : "Nueva semana"}
+                    Descontar préstamo
                   </button>
                 </div>
               </div>
 
-              {/* EDITOR NUEVA SEMANA */}
-              {editorOpen && (
-                <div className="fixed inset-0 z-[70] flex items-center justify-center px-4 py-10">
-                  <div
-                    className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                    onClick={() => setEditorOpen(false)}
-                    aria-hidden="true"
-                  />
-                  <div
-                    className="relative w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden rounded-3xl shadow-2xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/95 dark:bg-[#0b1020]/95"
-                    role="dialog"
-                    aria-modal="true"
-                    aria-label="Capturar nómina de nueva semana"
-                  >
-                    <header className="flex items-center justify-between gap-4 px-6 py-4 border-b border-petro-line/40 dark:border-white/15">
-                      <div>
-                        <h3 className="text-lg font-semibold text-petro-redDark">Capturar nómina de nueva semana</h3>
-                        <p className="text-xs opacity-70">
-                          Completa los movimientos y agrégalos sin perder de vista la nómina principal.
-                        </p>
-                      </div>
-                      <button
-                        className="px-3 py-1.5 rounded-lg bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 hover:bg-white text-sm"
-                        onClick={() => setEditorOpen(false)}
-                      >
-                        Cerrar
-                      </button>
-                    </header>
-                    <div className="flex-1 overflow-y-auto px-6 py-5">
-                      <div className="space-y-5">
-                        {/* Controles de auto-cálculo */}
-                        <div className="flex flex-wrap gap-3 text-xs items-center">
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={autoExtra}
-                              onChange={(e) => setAutoExtra(e.target.checked)}
-                            />
-                            $/h extra automático = $/h primaria ×
-                          </label>
-                          <input
-                            type="number"
-                            step="0.1"
-                            className="w-16 px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                            value={extraMultiplier}
-                            onChange={(e) => setExtraMultiplier(Math.max(0, Number(e.target.value) || 0))}
-                            title="Multiplicador para hora extra"
-                          />
-                          <span className="opacity-60">·</span>
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={autoHorasExtra}
-                              onChange={(e) => setAutoHorasExtra(e.target.checked)}
-                            />
-                            Calcular horas extra sobre
-                          </label>
-                          <input
-                            type="number"
-                            className="w-16 px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                            value={extrasThreshold}
-                            onChange={(e) => setExtrasThreshold(Math.max(0, Number(e.target.value) || 0))}
-                            title="Umbral de horas normales por semana"
-                          />
-                          <span className="opacity-60">h/sem</span>
-                        </div>
-
-                        <div className="flex flex-col md:flex-row gap-3">
-                          <input
-                            className="flex-1 px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                            placeholder='Título de semana (ej. "SEMANA #36 DEL 08 AL 14 DE SEPTIEMBRE 2025")'
-                            value={semanaInput}
-                            onChange={(e) => setSemanaInput(e.target.value)}
-                          />
-                          <div className="flex gap-2">
-                            <button
-                              className="px-4 py-2 rounded-xl bg-gradient-to-r from-petro-red to-petro-redDark text-white shadow hover:shadow-lg"
-                              onClick={addWeekToView}
-                            >
-                              Agregar a la vista
-                            </button>
-                            <button
-                              className="px-4 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 hover:bg-white"
-                              onClick={downloadWeekJSON}
-                            >
-                              Descargar JSON (solo esta semana)
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="overflow-auto rounded-xl border border-petro-line/60 dark:border-white/10">
-                          <table className="w-full text-sm">
-                            <thead>
-                              <tr className="bg-gradient-to-r from-petro-red to-petro-redDark text-white">
-                                <th className="px-3 py-2 text-left">Nombre</th>
-                                <th className="px-3 py-2 text-right">Horas primarias</th>
-                                <th className="px-3 py-2 text-right">Horas extras</th>
-                                <th className="px-3 py-2 text-right">$/h primaria</th>
-                                <th className="px-3 py-2 text-right">$/h extra</th>
-                                <th className="px-3 py-2 text-right">Bono semanal</th>
-                                <th className="px-3 py-2 text-right">Bono mensual</th>
-                                <th className="px-3 py-2 text-right">Comisión</th>
-                                <th className="px-3 py-2 text-right">Descuentos</th>
-                                <th className="px-3 py-2 text-right">Pend. desc.</th>
-                                <th className="px-3 py-2 text-right">Base semanal</th>
-                                <th className="px-3 py-2">Extra</th>
-                                <th className="px-3 py-2"></th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {draftRows.map((r, idx) => {
-                                return (
-                                  <tr
-                                    key={idx}
-                                    className={idx % 2 ? "bg-white/60 dark:bg-white/5" : "bg-white/30 dark:bg-transparent"}
-                                  >
-                                    <td className="px-3 py-2">
-                                      <input
-                                        className="w-44 px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                                        value={r.nombre}
-                                        onChange={(e) => updateDraft(idx, "nombre", e.target.value)}
-                                        placeholder="Empleado"
-                                        list="empleados-nombres"
-                                      />
-                                    </td>
-                                    <td className="px-3 py-2 text-right">
-                                      <input
-                                        type="number"
-                                        className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                                        value={r.total_horas_primarias}
-                                        onChange={(e) =>
-                                          updateDraft(idx, "total_horas_primarias", Number(e.target.value))
-                                        }
-                                      />
-                                    </td>
-                                    <td className="px-3 py-2 text-right">
-                                      <input
-                                        type="number"
-                                        className="w-24 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                                        value={r.horas_extras}
-                                        onChange={(e) => updateDraft(idx, "horas_extras", Number(e.target.value))}
-                                      />
-                                    </td>
-                                    <td className="px-3 py-2 text-right">
-                                      <input
-                                        type="number"
-                                        className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                                        value={r.costo_hora_primaria}
-                                        onChange={(e) => updateDraft(idx, "costo_hora_primaria", Number(e.target.value))}
-                                        onBlur={(e) => {
-                                          if (autoExtra) {
-                                            const base = Number(e.target.value) || 0;
-                                            const calc = Math.round(base * extraMultiplier * 100) / 100;
-                                            updateDraft(idx, "costo_hora_extra", calc as any);
-                                          }
-                                        }}
-                                      />
-                                    </td>
-                                    <td className="px-3 py-2 text-right">
-                                      <input
-                                        type="number"
-                                        className="w-24 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                                        value={r.costo_hora_extra}
-                                        onChange={(e) => updateDraft(idx, "costo_hora_extra", Number(e.target.value))}
-                                      />
-                                    </td>
-                                    <td className="px-3 py-2 text-right">
-                                      <input
-                                        type="number"
-                                        className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                                        value={r.bono_semanal}
-                                        onChange={(e) => updateDraft(idx, "bono_semanal", Number(e.target.value))}
-                                      />
-                                    </td>
-                                    <td className="px-3 py-2 text-right">
-                                      <input
-                                        type="number"
-                                        className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                                        value={r.bono_mensual}
-                                        onChange={(e) => updateDraft(idx, "bono_mensual", Number(e.target.value))}
-                                      />
-                                    </td>
-                                    <td className="px-3 py-2 text-right">
-                                      <input
-                                        type="number"
-                                        className="w-24 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                                        value={r.comision}
-                                        onChange={(e) => updateDraft(idx, "comision", Number(e.target.value))}
-                                      />
-                                    </td>
-                                    <td className="px-3 py-2 text-right">
-                                      <input
-                                        type="number"
-                                        className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                                        value={r.descuentos}
-                                        onChange={(e) => updateDraft(idx, "descuentos", Number(e.target.value))}
-                                      />
-                                    </td>
-                                    <td className="px-3 py-2 text-right">
-                                      <input
-                                        type="number"
-                                        className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                                        value={r.pendiente_descuento}
-                                        onChange={(e) => updateDraft(idx, "pendiente_descuento", Number(e.target.value))}
-                                      />
-                                    </td>
-                                    <td className="px-3 py-2 text-right">
-                                      <input
-                                        type="number"
-                                        className="w-28 text-right px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                                        value={r.pago_semanal_base}
-                                        onChange={(e) => updateDraft(idx, "pago_semanal_base", Number(e.target.value))}
-                                      />
-                                    </td>
-                                    <td className="px-3 py-2">
-                                      <input
-                                        className="w-40 px-2 py-1 rounded-lg bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                                        value={r.extra || ""}
-                                        onChange={(e) => updateDraft(idx, "extra", e.target.value)}
-                                        placeholder="Nota/extra"
-                                      />
-                                    </td>
-                                    <td className="px-3 py-2">
-                                      <button
-                                        className="px-2 py-1 rounded-lg bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 hover:bg-white"
-                                        onClick={() => removeDraftRow(idx)}
-                                        title="Eliminar fila"
-                                      >
-                                        ✕
-                                      </button>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                          <datalist id="empleados-nombres">
-                            {empleados.map((e) => (
-                              <option key={e._id} value={e.nombre} />
-                            ))}
-                          </datalist>
-                        </div>
-
-                        <div className="flex items-center justify-between text-xs opacity-80">
-                          <div>
-                            <button
-                              className="px-3 py-1.5 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 hover:bg-white"
-                              onClick={addDraftRow}
-                            >
-                              + Agregar empleado
-                            </button>
-                          </div>
-                          <div className="text-right">
-                            {(() => {
-                              const prim = draftRows.reduce(
-                                (a, r) => a + r.total_horas_primarias * r.costo_hora_primaria,
-                                0
-                              );
-                              const ext = draftRows.reduce(
-                                (a, r) => a + r.horas_extras * r.costo_hora_extra,
-                                0
-                              );
-                              const bonos = draftRows.reduce((a, r) => a + (r.bono_semanal || 0), 0);
-                              const bonosMensuales = draftRows.reduce((a, r) => a + (r.bono_mensual || 0), 0);
-                              const comisiones = draftRows.reduce((a, r) => a + (r.comision || 0), 0);
-                              const desc = draftRows.reduce((a, r) => a + (r.descuentos || 0), 0);
-                              const calc = prim + ext;
-                              const total = calc - desc + bonos + bonosMensuales + comisiones;
-                              return (
-                                <div>
-                                  <div>Pago primarias: <b>{fmt(prim)}</b> · Pago extras: <b>{fmt(ext)}</b></div>
-                                  <div>Bonos semanales: <b>{fmt(bonos)}</b> · Bonos mensuales: <b>{fmt(bonosMensuales)}</b></div>
-                                  <div>Comisiones: <b>{fmt(comisiones)}</b> · Descuentos: <b>{fmt(desc)}</b></div>
-                                  <div>Total estimado semana: <b>{fmt(total)}</b></div>
-                                </div>
-                              );
-                            })()}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
 
               {/* MÉTRICAS – TARJETAS */}
               <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -1986,6 +1915,176 @@ async function addWeekToView() {
                   </div>
                 )}
               </section>
+              {descuentoModalOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm"
+                    onClick={cerrarModalDescuento}
+                    aria-hidden="true"
+                  />
+                  <div className="fixed inset-0 z-[90] flex items-center justify-center px-4 py-8">
+                    <div className="w-full max-w-3xl rounded-3xl shadow-2xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/95 dark:bg-[#0b1020]/95 overflow-hidden">
+                      <header className="flex items-center justify-between gap-4 px-6 py-4 border-b border-petro-line/40 dark:border-white/15">
+                        <div>
+                          <h3 className="text-lg font-semibold text-petro-redDark dark:text-petro-redLight">
+                            Descontar préstamo de nómina
+                          </h3>
+                          <p className="text-xs opacity-70">
+                            Actualiza el descuento y el faltante de una nómina ya registrada.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className="px-3 py-1.5 rounded-lg bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 hover:bg-white text-sm"
+                          onClick={cerrarModalDescuento}
+                        >
+                          Cerrar
+                        </button>
+                      </header>
+                      <form
+                        className="px-6 py-5 space-y-5"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          guardarDescuentoNomina();
+                        }}
+                      >
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <label className="space-y-1 text-sm">
+                            <span className="font-medium">Semana</span>
+                            <select
+                              className="w-full rounded-xl px-3 py-2 bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
+                              value={semanaObjetivo}
+                              onChange={(e) => setSemanaObjetivo(e.target.value)}
+                            >
+                              <option value="">Selecciona semana…</option>
+                              {semanasDisponiblesNomina.map((sem) => (
+                                <option key={sem} value={sem}>
+                                  {sem}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="space-y-1 text-sm">
+                            <span className="font-medium">Empleado</span>
+                            <select
+                              className="w-full rounded-xl px-3 py-2 bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 disabled:opacity-50"
+                              value={nominaObjetivoId}
+                              onChange={(e) => seleccionarNomina(e.target.value)}
+                              disabled={!semanaObjetivo || nominasSemanaSeleccionada.length === 0}
+                            >
+                              <option value="">Selecciona empleado…</option>
+                              {nominasSemanaSeleccionada.map((nomina) => (
+                                <option key={nomina._id} value={nomina._id}>
+                                  {nomina.nombre} · ${fmt(safeNumber(nomina.total_final ?? nomina.pago_semanal_calc ?? 0))}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+
+                        {!semanasDisponiblesNomina.length && (
+                          <p className="text-sm opacity-70">
+                            No se encontraron nóminas registradas. Guarda una nómina antes de aplicar descuentos.
+                          </p>
+                        )}
+
+                        {semanaObjetivo && nominasSemanaSeleccionada.length === 0 && (
+                          <p className="text-sm opacity-70">
+                            Esta semana no tiene empleados registrados en la base de datos.
+                          </p>
+                        )}
+
+                        {registroNominaSeleccionado ? (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-2xl border border-petro-line/40 dark:border-white/10 bg-white/60 dark:bg-white/5 px-4 py-3 text-sm">
+                            <div>
+                              <span className="font-medium block">Pago base registrado</span>
+                              <span className="font-mono text-lg">{fmt(pagoBaseNomina)}</span>
+                            </div>
+                            <div>
+                              <span className="font-medium block">Descuento actual</span>
+                              <span className="font-mono">{fmt(descuentoAnterior)}</span>
+                            </div>
+                            <div>
+                              <span className="font-medium block">Pendiente actual</span>
+                              <span className="font-mono">{fmt(pendienteAnterior)}</span>
+                            </div>
+                            <div>
+                              <span className="font-medium block">Total estimado con descuento</span>
+                              <span className="font-mono text-lg text-petro-redDark dark:text-petro-redLight">
+                                {fmt(nuevoTotalEstimado)}
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-sm opacity-70">
+                            Selecciona un empleado para revisar el detalle de la nómina guardada.
+                          </p>
+                        )}
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <label className="space-y-1 text-sm">
+                            <span className="font-medium">Descuento a aplicar</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              className="w-full rounded-xl px-3 py-2 bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
+                              value={descuentoValor}
+                              onChange={(e) => setDescuentoValor(e.target.value)}
+                              placeholder="Ej. 500"
+                            />
+                          </label>
+                          <label className="space-y-1 text-sm">
+                            <span className="font-medium flex items-center justify-between">
+                              Faltante del préstamo
+                              {registroNominaSeleccionado && (
+                                <button
+                                  type="button"
+                                  className="ml-2 px-2 py-1 rounded-md border border-petro-line/60 dark:border-white/10 bg-white/80 dark:bg-white/10 text-xs"
+                                  onClick={() => {
+                                    const restante = Math.max(
+                                      0,
+                                      pendienteAnterior -
+                                        (Number.isFinite(descuentoPropuesto) ? descuentoPropuesto : 0)
+                                    );
+                                    setPendienteValor(String(round2(restante)));
+                                  }}
+                                >
+                                  Calcular restante
+                                </button>
+                              )}
+                            </span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              className="w-full rounded-xl px-3 py-2 bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
+                              value={pendienteValor}
+                              onChange={(e) => setPendienteValor(e.target.value)}
+                              placeholder="Ej. 1200"
+                            />
+                          </label>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3 pt-2">
+                          <button
+                            type="button"
+                            className="px-4 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-sm"
+                            onClick={cerrarModalDescuento}
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={!nominaObjetivoId || guardandoDescuento}
+                            className="px-4 py-2 rounded-xl bg-gradient-to-r from-petro-red to-petro-redDark text-white text-sm shadow hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            {guardandoDescuento ? "Guardando…" : "Guardar cambios"}
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                </>
+              )}
             </>
           )}
 
@@ -2010,6 +2109,10 @@ async function addWeekToView() {
                         nombre: e.nombre,
                         puesto: e.puesto,
                         area: e.area,
+                        direccion: e.direccion,
+                        telefono: e.telefono,
+                        rfc: e.rfc,
+                        curp: e.curp,
                         estatus: e.estatus,
                         tarifa: e.tarifa,
                         extraX: e.extraX,
@@ -2180,27 +2283,40 @@ async function addWeekToView() {
                                 />
                               </td>
                               <td className="px-3 py-2 text-center whitespace-nowrap">
-                                <button
-                                  className="px-2 py-1 rounded-lg bg-amber-500/90 hover:bg-amber-500 text-white text-xs mr-1"
-                                  onClick={() => {
-                                    const monto = Number(prompt("Monto del préstamo:", "0"));
-                                    if (!monto || isNaN(monto)) return;
-                                    const descripcion = prompt("Descripción o motivo:", "") || "";
-                                    agregarPrestamo(emp._id, monto, descripcion);
-                                  }}
-                                  title="Registrar préstamo"
-                                  aria-label="Registrar préstamo"
-                                >
-                                  💵
-                                </button>
-                                <button
-                                  className="px-2 py-1 rounded-lg bg-rose-500/90 hover:bg-rose-500 text-white text-xs"
-                                  onClick={() => borrarEmpleado(emp._id)}
-                                  title="Eliminar empleado"
-                                  aria-label="Eliminar empleado"
-                                >
-                                  🗑️
-                                </button>
+                                <div className="flex flex-wrap items-center justify-end gap-1">
+                                  <button
+                                    className="px-2 py-1 rounded-lg bg-blue-500/90 hover:bg-blue-500 text-white text-xs"
+                                    onClick={() => abrirExtrasEmpleado(emp)}
+                                    title="Ver datos extra"
+                                    aria-label="Ver datos extra"
+                                    type="button"
+                                  >
+                                    📋 Extras
+                                  </button>
+                                  <button
+                                    className="px-2 py-1 rounded-lg bg-amber-500/90 hover:bg-amber-500 text-white text-xs"
+                                    onClick={() => {
+                                      const monto = Number(prompt("Monto del préstamo:", "0"));
+                                      if (!monto || isNaN(monto)) return;
+                                      const descripcion = prompt("Descripción o motivo:", "") || "";
+                                      agregarPrestamo(emp._id, monto, descripcion);
+                                    }}
+                                    title="Registrar préstamo"
+                                    aria-label="Registrar préstamo"
+                                    type="button"
+                                  >
+                                    💵 Préstamo
+                                  </button>
+                                  <button
+                                    className="px-2 py-1 rounded-lg bg-rose-500/90 hover:bg-rose-500 text-white text-xs"
+                                    onClick={() => borrarEmpleado(emp._id)}
+                                    title="Eliminar empleado"
+                                    aria-label="Eliminar empleado"
+                                    type="button"
+                                  >
+                                    🗑️ Borrar
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           ))
@@ -2265,6 +2381,118 @@ async function addWeekToView() {
                 </div>
               </div>
             </div>
+          )}
+
+          {extraEmpleado && (
+            <>
+              <div
+                className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40"
+                onClick={cerrarExtrasEmpleado}
+                aria-hidden="true"
+              />
+              <div className="fixed inset-x-0 bottom-0 z-50 flex justify-center px-4 pb-6">
+                <div className="w-full max-w-3xl rounded-t-3xl shadow-2xl bg-white dark:bg-petro-charcoal border border-petro-line/40 dark:border-white/10">
+                  <header className="flex items-start justify-between gap-3 px-6 pt-5 pb-3 border-b border-petro-line/40 dark:border-white/10">
+                    <div>
+                      <h3 className="text-lg font-semibold text-petro-redDark dark:text-petro-redLight">
+                        Datos extra de {extraEmpleado.nombre}
+                      </h3>
+                      <p className="text-xs opacity-60">
+                        Edita dirección, teléfono, RFC y CURP desde este panel.
+                      </p>
+                    </div>
+                    <button
+                      className="px-3 py-1.5 rounded-lg bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-sm"
+                      onClick={cerrarExtrasEmpleado}
+                      type="button"
+                    >
+                      Cerrar
+                    </button>
+                  </header>
+                  <form
+                    className="px-6 py-5 space-y-4"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void guardarExtrasEmpleado();
+                    }}
+                  >
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <label className="space-y-1 text-sm">
+                        <span className="font-medium">Dirección</span>
+                        <textarea
+                          className="w-full h-20 resize-none rounded-lg px-3 py-2 bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
+                          value={extraForm.direccion}
+                          onChange={(e) =>
+                            setExtraForm((prev) => ({ ...prev, direccion: e.target.value }))
+                          }
+                          placeholder="Calle, número, colonia…"
+                        />
+                      </label>
+                      <div className="grid grid-cols-1 gap-4">
+                        <label className="space-y-1 text-sm">
+                          <span className="font-medium">Teléfono</span>
+                          <input
+                            className="w-full rounded-lg px-3 py-2 bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
+                            value={extraForm.telefono}
+                            onChange={(e) =>
+                              setExtraForm((prev) => ({ ...prev, telefono: e.target.value }))
+                            }
+                            placeholder="Ej. 55 1234 5678"
+                            type="tel"
+                            inputMode="tel"
+                          />
+                        </label>
+                        <label className="space-y-1 text-sm">
+                          <span className="font-medium">RFC</span>
+                          <input
+                            className="w-full rounded-lg px-3 py-2 uppercase bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
+                            value={extraForm.rfc}
+                            onChange={(e) =>
+                              setExtraForm((prev) => ({
+                                ...prev,
+                                rfc: e.target.value.toUpperCase(),
+                              }))
+                            }
+                            placeholder="RFC"
+                            maxLength={13}
+                          />
+                        </label>
+                        <label className="space-y-1 text-sm">
+                          <span className="font-medium">CURP</span>
+                          <input
+                            className="w-full rounded-lg px-3 py-2 uppercase bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
+                            value={extraForm.curp}
+                            onChange={(e) =>
+                              setExtraForm((prev) => ({
+                                ...prev,
+                                curp: e.target.value.toUpperCase(),
+                              }))
+                            }
+                            placeholder="CURP"
+                            maxLength={18}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 pt-3">
+                      <button
+                        type="button"
+                        className="px-4 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-sm"
+                        onClick={cerrarExtrasEmpleado}
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-petro-red to-petro-redDark text-white text-sm shadow hover:shadow-lg"
+                      >
+                        Guardar cambios
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </>
           )}
 
           {/* ─────────────── BILLETES ─────────────── */}

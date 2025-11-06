@@ -8,6 +8,10 @@ export type Employee = {
   nombre: string;
   puesto: string;
   area: string;
+  direccion: string;
+  telefono: string;
+  rfc: string;
+  curp: string;
   estatus: Estatus;
   tarifa: number;
   extraX: number;
@@ -221,6 +225,22 @@ export async function createNomina(payload: NominaPayload): Promise<Nomina> {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      credentials: "include",
+    })
+  );
+}
+
+type NominaUpdatePayload = {
+  descuentos?: number;
+  pendiente_descuento?: number;
+};
+
+export async function updateNomina(id: string, data: NominaUpdatePayload): Promise<Nomina> {
+  return handleJSON<Nomina>(
+    fetch(`${API_BASE}/nominas/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
       credentials: "include",
     })
   );
