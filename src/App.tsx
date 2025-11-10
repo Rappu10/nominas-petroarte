@@ -58,6 +58,11 @@ type EditableNominaRow = {
   total_final: string;
 };
 
+type ManualBonusFlags = {
+  semanal: boolean;
+  mensual: boolean;
+};
+
 /* ───── Utilidades ─────────────────────────────────────────────── */
 function toCSV(rows: Row[]): string {
   if (!rows?.length) return "";
@@ -86,6 +91,8 @@ const fmt = (n: number) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(n);
+
+const HIDDEN_COLUMNS = new Set(["__v"]);
 
 /** Parse HH:MM o legacy 8,50 */
 function parseTimeToHours(input: string): number | null {
@@ -241,6 +248,14 @@ export default function App() {
   const [semanaNominaTouched, setSemanaNominaTouched] = useState(false);
   const [empleados, setEmpleados] = useState<Employee[]>([]);
   const [loadingEmpleados, setLoadingEmpleados] = useState(false);
+  const empleadosNombres = useMemo(() => {
+    const set = new Set<string>();
+    empleados.forEach((emp) => {
+      const nombre = String(emp.nombre ?? "").trim();
+      if (nombre) set.add(nombre);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [empleados]);
   const [extraEmpleado, setExtraEmpleado] = useState<Employee | null>(null);
   const [extraForm, setExtraForm] = useState({
     direccion: "",
@@ -308,10 +323,10 @@ export default function App() {
   };
 
   // Columnas
-  const columns = useMemo(
-    () => (rawData.length ? Object.keys(rawData[0]) : []),
-    [rawData]
-  );
+  const columns = useMemo(() => {
+    if (!rawData.length) return [];
+    return Object.keys(rawData[0]).filter((col) => !HIDDEN_COLUMNS.has(col));
+  }, [rawData]);
   const numericCols = useMemo(
     () => columns.filter((c) => isNumericColumn(rawData, c)),
     [columns, rawData]
@@ -687,6 +702,15 @@ export default function App() {
     Viernes: "VIE",
     Sábado: "SAB",
   };
+  const TEMPLATE_DAYS: readonly string[] = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+  const DAY_DEFAULTS: Record<DayKey, DayPair> = {
+    LUN: { in: "08:30", out: "18:00" },
+    MAR: { in: "08:30", out: "18:00" },
+    MIE: { in: "08:30", out: "18:00" },
+    JUE: { in: "08:30", out: "18:00" },
+    VIE: { in: "08:30", out: "18:00" },
+    SAB: { in: "08:30", out: "14:00" },
+  };
 
   const createEmptyCheckRow = (): CheckRow => ({
     nombre: "",
@@ -704,6 +728,115 @@ export default function App() {
   const [historialCargando, setHistorialCargando] = useState(false);
   const [historialError, setHistorialError] = useState<string | null>(null);
   const [historialLoaded, setHistorialLoaded] = useState(false);
+  const normalizarNombre = useCallback((nombre: string) => nombre.trim().toLowerCase(), []);
+  const [manualBonos, setManualBonos] = useState<Record<string, ManualBonusFlags>>({});
+  const [checkTemplateMode, setCheckTemplateMode] = useState<"nombreArriba" | null>(null);
+  const toggleManualBono = useCallback(
+    (nombre: string, tipo: keyof ManualBonusFlags) => {
+      const key = normalizarNombre(nombre);
+      if (!key) return;
+      setManualBonos((prev) => {
+        const actual = prev[key] ?? { semanal: false, mensual: false };
+        return {
+          ...prev,
+          [key]: { ...actual, [tipo]: !actual[tipo] },
+        };
+      });
+    },
+    [normalizarNombre]
+  );
+  const isNombreArribaTemplate = checkTemplateMode === "nombreArriba";
+  const nombreArribaDias = useMemo(
+    () => TEMPLATE_DAYS.filter((dia) => diasActivos.includes(dia)),
+    [diasActivos]
+  );
+  const weeklyNombreArribaRows = useMemo(() => {
+    if (!isNombreArribaTemplate || nombreArribaDias.length === 0) return [];
+    const maxRows = nombreArribaDias.reduce(
+      (max, dia) => Math.max(max, checkData[dia]?.length ?? 0),
+      0
+    );
+    return Array.from({ length: maxRows }, (_, index) => {
+      const rowsPorDia = nombreArribaDias.reduce<Record<string, CheckRow | undefined>>(
+        (acc, dia) => {
+          acc[dia] = checkData[dia]?.[index];
+          return acc;
+        },
+        {}
+      );
+      const nombre =
+        nombreArribaDias.reduce<string | undefined>((found, dia) => {
+          if (found) return found;
+          const row = rowsPorDia[dia];
+          return row?.nombre && row.nombre.trim().length > 0 ? row.nombre : undefined;
+        }, undefined) ?? "";
+      return { index, nombre, rowsPorDia };
+    });
+  }, [isNombreArribaTemplate, nombreArribaDias, checkData]);
+
+  const actualizarNombreArribaNombre = useCallback(
+    (rowIndex: number, nombre: string) => {
+      if (!isNombreArribaTemplate || !nombreArribaDias.length) return;
+      setCheckData((prev) => {
+        const next = { ...prev };
+        nombreArribaDias.forEach((dia) => {
+          const rows = [...(next[dia] ?? [])];
+          while (rows.length <= rowIndex) rows.push(createEmptyCheckRow());
+          const current = rows[rowIndex];
+          rows[rowIndex] = { ...current, nombre };
+          next[dia] = rows;
+        });
+        return next;
+      });
+    },
+    [isNombreArribaTemplate, nombreArribaDias]
+  );
+
+  const actualizarNombreArribaHorario = useCallback(
+    (dia: string, rowIndex: number, field: keyof DayPair, value: string) => {
+      if (!isNombreArribaTemplate) return;
+      const dayKey = DAY_NAME_TO_KEY[dia];
+      if (!dayKey) return;
+      setCheckData((prev) => {
+        const rows = [...(prev[dia] ?? [])];
+        while (rows.length <= rowIndex) rows.push(createEmptyCheckRow());
+        const current = rows[rowIndex];
+        rows[rowIndex] = {
+          ...current,
+          [dayKey]: { ...current[dayKey], [field]: value },
+        };
+        return { ...prev, [dia]: rows };
+      });
+    },
+    [isNombreArribaTemplate]
+  );
+
+  const agregarNombreArribaRow = useCallback(() => {
+    if (!isNombreArribaTemplate || !nombreArribaDias.length) return;
+    setCheckData((prev) => {
+      const next = { ...prev };
+      nombreArribaDias.forEach((dia) => {
+        const rows = [...(next[dia] ?? [])];
+        rows.push(createEmptyCheckRow());
+        next[dia] = rows;
+      });
+      return next;
+    });
+  }, [isNombreArribaTemplate, nombreArribaDias]);
+
+  const eliminarNombreArribaRow = useCallback(
+    (rowIndex: number) => {
+      if (!isNombreArribaTemplate || !nombreArribaDias.length) return;
+      setCheckData((prev) => {
+        const next = { ...prev };
+        nombreArribaDias.forEach((dia) => {
+          next[dia] = (next[dia] ?? []).filter((_, idx) => idx !== rowIndex);
+        });
+        return next;
+      });
+    },
+    [isNombreArribaTemplate, nombreArribaDias]
+  );
 
   const historialDias = useMemo(() => {
     type HistorialDiaInternal = {
@@ -775,7 +908,6 @@ export default function App() {
   const BONUS_MONTHLY_AMOUNT = 1600;
 
   const resumenBonosSemana = useMemo(() => {
-    const normalizarNombre = (nombre: string) => nombre.trim().toLowerCase();
     const displayNames = new Map<string, string>();
 
     const currentTotals = new Map<string, number>();
@@ -892,7 +1024,7 @@ export default function App() {
         a.nombre.localeCompare(b.nombre)
     );
     return resultados;
-  }, [diasActivos, checkData, semanaCheckin, historialCheckins]);
+  }, [diasActivos, checkData, semanaCheckin, historialCheckins, normalizarNombre]);
 
   /* ───── Descuentos de nómina ─────────────────────────────────── */
   const [descuentoModalOpen, setDescuentoModalOpen] = useState(false);
@@ -1230,6 +1362,19 @@ export default function App() {
   };
 
   const addCheckRow = () => {
+    if (checkTemplateMode === "nombreArriba") {
+      setCheckData((prev) => {
+        const next = { ...prev };
+        TEMPLATE_DAYS.forEach((dia) => {
+          if (!diasActivos.includes(dia)) return;
+          const rows = [...(next[dia] ?? [])];
+          rows.push(createEmptyCheckRow());
+          next[dia] = rows;
+        });
+        return next;
+      });
+      return;
+    }
     const dia = diasActivos[diasActivos.length - 1];
     if (!dia) {
       alert("Agrega un día antes de insertar filas.");
@@ -1243,18 +1388,20 @@ export default function App() {
     void cargarHistorial();
   }, [section, cargarHistorial]);
 
-  function loadUserTemplate() {
+  function loadNombreArribaTemplate() {
     const select = document.getElementById("nuevo-dia") as HTMLSelectElement | null;
-    const diasTemplate = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+    const diasTemplate = [...TEMPLATE_DAYS];
     const template: Record<string, CheckRow[]> = {};
+    const rowsPerDay = 12;
 
-    const rowsPerDay = 15;
     diasTemplate.forEach((dia) => {
       const dayKey = DAY_NAME_TO_KEY[dia];
       if (!dayKey) return;
-      template[dia] = Array.from({ length: rowsPerDay }, () => {
+      const defaults = DAY_DEFAULTS[dayKey];
+      template[dia] = Array.from({ length: rowsPerDay }, (_, idx) => {
         const base = createEmptyCheckRow();
-        base[dayKey] = { in: "08:30", out: "18:00" };
+        base.nombre = "";
+        base[dayKey] = { in: defaults.in, out: defaults.out };
         return base;
       });
     });
@@ -1262,6 +1409,7 @@ export default function App() {
     setDiasActivos(diasTemplate);
     setCheckData(template);
     if (select) select.value = "";
+    setCheckTemplateMode("nombreArriba");
   }
 
   async function guardarCheckins(dia: string) {
@@ -1504,9 +1652,9 @@ export default function App() {
                   </button>
                   <button
                     className="px-3 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-sm"
-                    onClick={loadUserTemplate}
+                    onClick={loadNombreArribaTemplate}
                   >
-                    Cargar plantilla (Semana típica)
+                    Cargar plantilla (Semana Tipica)
                   </button>
                 </div>
               </div>
@@ -1560,12 +1708,147 @@ export default function App() {
                   </button>
                 </div>
 
-                {diasActivos.length === 0 ? (
-                  <p className="opacity-70 text-sm px-4 pb-4">
-                    No hay días agregados aún. Selecciona uno y pulsa “Agregar día”.
-                  </p>
-                ) : (
-                  diasActivos.map((dia) => {
+                {isNombreArribaTemplate && (
+                  <div className="px-4 pb-4">
+                    <div className="rounded-2xl border border-dashed border-petro-line/70 dark:border-white/15 bg-white/80 dark:bg-white/5 p-4 space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-petro-redDark dark:text-petro-redLight">
+                            Plantilla: Modo Tabla
+                          </p>
+                          <p className="text-xs opacity-70">
+                            Captura el nombre y debajo ajusta entrada/salida para Lunes a Sábado en una sola tarjeta.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={agregarNombreArribaRow}
+                          className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-petro-red to-petro-redDark text-white text-sm shadow"
+                        >
+                          + Agregar empleado semanal
+                        </button>
+                      </div>
+                      {!nombreArribaDias.length ? (
+                        <p className="text-sm opacity-70">
+                          Activa al menos un día para utilizar esta plantilla.
+                        </p>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          {weeklyNombreArribaRows.length === 0 ? (
+                            <p className="text-sm opacity-70">
+                              Usa “Agregar empleado semanal” para crear la primera tarjeta con los 6 días.
+                            </p>
+                          ) : (
+                            <table className="w-full text-sm">
+                              <tbody>
+                                {weeklyNombreArribaRows.map((row) => (
+                                  <tr key={`nombre-arriba-${row.index}`}>
+                                    <td className="p-2" colSpan={7}>
+                                      <div className="rounded-2xl border border-petro-line/60 dark:border-white/15 bg-white/95 dark:bg-white/5 p-3 space-y-3 shadow-sm">
+                                        <div className="flex flex-wrap items-center gap-3">
+                                          <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
+                                            Nombre
+                                          </label>
+                                          <input
+                                            list={`empleados-nombre-arriba-${row.index}`}
+                                            value={row.nombre}
+                                            onChange={(event) =>
+                                              actualizarNombreArribaNombre(row.index, event.target.value)
+                                            }
+                                            className="flex-1 min-w-[200px] px-3 py-1.5 rounded-xl bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/15"
+                                            placeholder="Nombre del colaborador"
+                                          />
+                                          {empleadosNombres.length > 0 && (
+                                            <datalist id={`empleados-nombre-arriba-${row.index}`}>
+                                              {empleadosNombres.map((nombre) => (
+                                                <option key={`${row.index}-${nombre}`} value={nombre} />
+                                              ))}
+                                            </datalist>
+                                          )}
+                                          <button
+                                            type="button"
+                                            onClick={() => eliminarNombreArribaRow(row.index)}
+                                            className="ml-auto px-2 py-1 rounded-lg border border-red-200/60 text-red-600 text-xs hover:bg-red-50 dark:border-red-400/40 dark:text-red-300"
+                                          >
+                                            Eliminar
+                                          </button>
+                                        </div>
+                                        <div className="grid gap-2 md:grid-cols-6">
+                                          {nombreArribaDias.map((dia) => {
+                                            const dayKey = DAY_NAME_TO_KEY[dia];
+                                            const diaRow = row.rowsPorDia[dia];
+                                            const entrada = diaRow?.[dayKey]?.in ?? "";
+                                            const salida = diaRow?.[dayKey]?.out ?? "";
+                                            const defaults = DAY_DEFAULTS[dayKey];
+                                            const entradaFuera = Boolean(entrada) && entrada !== defaults.in;
+                                            const salidaFuera = Boolean(salida) && salida !== defaults.out;
+                                            const baseInput =
+                                              "w-full px-2 py-1 rounded-lg bg-white/80 dark:bg-white/10 text-center transition-colors";
+                                            const normalBorder =
+                                              "border border-petro-line/60 dark:border-white/15";
+                                            const warnBorder =
+                                              "border border-red-500 text-red-600 bg-red-50 dark:bg-red-500/10 dark:border-red-400/70 dark:text-red-100";
+                                            return (
+                                              <div
+                                                key={`${dia}-${row.index}`}
+                                                className="rounded-xl border border-petro-line/50 dark:border-white/15 bg-white/70 dark:bg-white/5 p-2 space-y-2"
+                                              >
+                                                <div className="text-xs font-semibold text-center uppercase tracking-wide text-slate-500 dark:text-slate-300">
+                                                  {dia}
+                                                </div>
+                                                <div className="space-y-1">
+                                                  <label className="text-[10px] uppercase tracking-wide opacity-70">
+                                                    Entrada
+                                                  </label>
+                                                  <input
+                                                    value={entrada}
+                                                    onChange={(event) =>
+                                                      actualizarNombreArribaHorario(dia, row.index, "in", event.target.value)
+                                                    }
+                                                    className={`${baseInput} ${
+                                                      entradaFuera ? warnBorder : normalBorder
+                                                    }`}
+                                                    placeholder={defaults.in}
+                                                  />
+                                                </div>
+                                                <div className="space-y-1">
+                                                  <label className="text-[10px] uppercase tracking-wide opacity-70">
+                                                    Salida
+                                                  </label>
+                                                  <input
+                                                    value={salida}
+                                                    onChange={(event) =>
+                                                      actualizarNombreArribaHorario(dia, row.index, "out", event.target.value)
+                                                    }
+                                                    className={`${baseInput} ${
+                                                      salidaFuera ? warnBorder : normalBorder
+                                                    }`}
+                                                    placeholder={defaults.out}
+                                                  />
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {!isNombreArribaTemplate &&
+                  (diasActivos.length === 0 ? (
+                    <p className="opacity-70 text-sm px-4 pb-4">
+                      No hay días agregados aún. Selecciona uno y pulsa “Agregar día”.
+                    </p>
+                  ) : (
+                    diasActivos.map((dia) => {
                     const dayKey = DAY_NAME_TO_KEY[dia] ?? "LUN";
                     const normalizedDia = encodeURIComponent(dia.toLowerCase());
                     return (
@@ -1604,16 +1887,19 @@ export default function App() {
                           </thead>
                           <tbody>
                             {checkData[dia]?.map((r, idx) => {
-                              const defaultIn = "08:30";
-                              const defaultOut = "18:00";
+                              const defaults = DAY_DEFAULTS[dayKey];
                               const entrada = r[dayKey].in;
                               const salida = r[dayKey].out;
-                              const entradaDiff = Boolean(entrada) && entrada !== defaultIn;
-                              const salidaDiff = Boolean(salida) && salida !== defaultOut;
+                              const entradaDiff = Boolean(entrada) && entrada !== defaults.in;
+                              const salidaDiff = Boolean(salida) && salida !== defaults.out;
                               const total = spanHours(entrada, salida);
                               const empleadosList = empleados.map((e) => e.nombre);
                               const baseInputClass =
-                                "px-2 py-1 w-24 rounded-md bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-center";
+                                "px-2 py-1 w-24 rounded-md bg-white/70 dark:bg-white/10 text-center transition-colors";
+                              const normalBorder =
+                                "border border-petro-line/60 dark:border-white/10";
+                              const warnBorder =
+                                "border border-red-500 text-red-600 bg-red-50 dark:bg-red-500/10 dark:border-red-400/70 dark:text-red-100";
                               return (
                                 <tr
                                   key={idx}
@@ -1657,7 +1943,7 @@ export default function App() {
                                         });
                                       }}
                                       className={`${baseInputClass} ${
-                                        entradaDiff ? "border-red-500 text-red-600 bg-red-50 dark:bg-red-500/10" : ""
+                                        entradaDiff ? warnBorder : normalBorder
                                       }`}
                                     />
                                   </td>
@@ -1678,7 +1964,7 @@ export default function App() {
                                         });
                                       }}
                                       className={`${baseInputClass} ${
-                                        salidaDiff ? "border-red-500 text-red-600 bg-red-50 dark:bg-red-500/10" : ""
+                                        salidaDiff ? warnBorder : normalBorder
                                       }`}
                                     />
                                   </td>
@@ -1724,7 +2010,7 @@ export default function App() {
                     </div>
                     );
                   })
-                )}
+                ))}
                 <button
                   className="mt-3 px-4 py-2 rounded-xl bg-green-600 text-white text-sm shadow hover:bg-green-700"
                   onClick={async () => {
@@ -1795,47 +2081,93 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody>
-                          {resumenBonosSemana.map((row) => (
-                            <tr
-                              key={row.nombre}
-                              className="odd:bg-white/70 dark:odd:bg-white/10 even:bg-white/40 dark:even:bg-transparent"
-                            >
-                              <td className="px-3 py-2">{row.nombre}</td>
-                              <td className="px-3 py-2 text-right font-mono">{fmt(row.horas)}</td>
-                              <td className="px-3 py-2 text-center">
-                                <span
-                                  className={`inline-flex h-7 w-7 items-center justify-center rounded-md border text-base ${
-                                    row.semanal
-                                      ? "border-emerald-500 bg-emerald-500/20 text-emerald-600"
-                                      : "border-petro-line/60 text-slate-400 dark:border-white/15"
-                                  }`}
-                                  title={
-                                    row.semanal
-                                      ? `Cumple con ${BONUS_WEEKLY_HOURS} h y recibe $${BONUS_WEEKLY_AMOUNT}`
-                                      : `Requiere ${BONUS_WEEKLY_HOURS} h para bono semanal`
-                                  }
-                                >
-                                  {row.semanal ? "✓" : ""}
-                                </span>
-                              </td>
-                              <td className="px-3 py-2 text-center">
-                                <span
-                                  className={`inline-flex h-7 w-7 items-center justify-center rounded-md border text-base ${
-                                    row.mensual
-                                      ? "border-emerald-500 bg-emerald-500/20 text-emerald-600"
-                                      : "border-petro-line/60 text-slate-400 dark:border-white/15"
-                                  }`}
-                                  title={
-                                    row.mensual
-                                      ? `Acumula ${BONUS_MONTHLY_STREAK} semanas consecutivas de ${BONUS_WEEKLY_HOURS} h`
-                                      : `Necesita ${BONUS_MONTHLY_STREAK} semanas consecutivas con ${BONUS_WEEKLY_HOURS} h`
-                                  }
-                                >
-                                  {row.mensual ? "✓" : ""}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
+                          {resumenBonosSemana.map((row) => {
+                            const manualKey = normalizarNombre(row.nombre);
+                            const manualFlags = manualBonos[manualKey];
+                            const manualSemanal = manualFlags?.semanal ?? false;
+                            const manualMensual = manualFlags?.mensual ?? false;
+                            return (
+                              <tr
+                                key={row.nombre}
+                                className="odd:bg-white/70 dark:odd:bg-white/10 even:bg-white/40 dark:even:bg-transparent"
+                              >
+                                <td className="px-3 py-2">{row.nombre}</td>
+                                <td className="px-3 py-2 text-right font-mono">{fmt(row.horas)}</td>
+                                <td className="px-3 py-2 text-center">
+                                  <div className="flex flex-col items-center gap-2">
+                                    <span
+                                      className={`inline-flex h-7 w-7 items-center justify-center rounded-md border text-base ${
+                                        row.semanal
+                                          ? "border-emerald-500 bg-emerald-500/20 text-emerald-600"
+                                          : "border-petro-line/60 text-slate-400 dark:border-white/15"
+                                      }`}
+                                      title={
+                                        row.semanal
+                                          ? `Cumple con ${BONUS_WEEKLY_HOURS} h y recibe $${BONUS_WEEKLY_AMOUNT}`
+                                          : `Requiere ${BONUS_WEEKLY_HOURS} h para bono semanal`
+                                      }
+                                    >
+                                      {row.semanal ? "✓" : ""}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleManualBono(row.nombre, "semanal")}
+                                      className="flex flex-col items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500 hover:text-petro-redDark focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-petro-redDark dark:text-slate-200"
+                                      title="Marcar o quitar la palomita semanal manualmente"
+                                      aria-pressed={manualSemanal}
+                                    >
+                                      <span
+                                        className={`inline-flex h-7 w-7 items-center justify-center rounded-md border text-base ${
+                                          manualSemanal
+                                            ? "border-indigo-500 bg-indigo-500/20 text-indigo-600 dark:border-indigo-300 dark:text-indigo-200"
+                                            : "border-petro-line/60 text-slate-400 dark:border-white/15"
+                                        }`}
+                                      >
+                                        {manualSemanal ? "✓" : ""}
+                                      </span>
+                                      <span>Manual</span>
+                                    </button>
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2 text-center">
+                                  <div className="flex flex-col items-center gap-2">
+                                    <span
+                                      className={`inline-flex h-7 w-7 items-center justify-center rounded-md border text-base ${
+                                        row.mensual
+                                          ? "border-emerald-500 bg-emerald-500/20 text-emerald-600"
+                                          : "border-petro-line/60 text-slate-400 dark:border-white/15"
+                                      }`}
+                                      title={
+                                        row.mensual
+                                          ? `Acumula ${BONUS_MONTHLY_STREAK} semanas consecutivas de ${BONUS_WEEKLY_HOURS} h`
+                                          : `Necesita ${BONUS_MONTHLY_STREAK} semanas consecutivas con ${BONUS_WEEKLY_HOURS} h`
+                                      }
+                                    >
+                                      {row.mensual ? "✓" : ""}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleManualBono(row.nombre, "mensual")}
+                                      className="flex flex-col items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500 hover:text-petro-redDark focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-petro-redDark dark:text-slate-200"
+                                      title="Marcar o quitar la palomita mensual manualmente"
+                                      aria-pressed={manualMensual}
+                                    >
+                                      <span
+                                        className={`inline-flex h-7 w-7 items-center justify-center rounded-md border text-base ${
+                                          manualMensual
+                                            ? "border-indigo-500 bg-indigo-500/20 text-indigo-600 dark:border-indigo-300 dark:text-indigo-200"
+                                            : "border-petro-line/60 text-slate-400 dark:border-white/15"
+                                        }`}
+                                      >
+                                        {manualMensual ? "✓" : ""}
+                                      </span>
+                                      <span>Manual</span>
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -2101,19 +2433,19 @@ export default function App() {
                 </div>
               </section>
 
-              <section className="rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-[#161616] text-gray-100 backdrop-blur space-y-4">
+              <section className="rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/85 text-petro-ink dark:bg-[#161616] dark:text-gray-100 backdrop-blur space-y-4">
                 <header className="flex items-center justify-between">
                   <div>
-                    <h2 className="text-lg font-semibold text-white">Historial de nóminas guardadas</h2>
-                    <p className="text-sm opacity-70">Revisa los empleados capturados en cada semana.</p>
+                    <h2 className="text-lg font-semibold text-petro-redDark dark:text-white">Historial de nóminas guardadas</h2>
+                    <p className="text-sm opacity-70 text-petro-ink/70 dark:text-white/70">Revisa los empleados capturados en cada semana.</p>
                   </div>
-                  <span className="text-xs opacity-60">
+                  <span className="text-xs opacity-60 text-petro-ink/70 dark:text-white/60">
                     {nominasFiltradas.length.toLocaleString()} semanas listadas
                   </span>
                 </header>
                 <div className="flex flex-wrap items-center gap-2 mb-4">
                   <input
-                    className="px-3 py-2 w-full md:w-72 rounded-xl bg-white/15 dark:bg-white/10 border border-white/15 text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/40"
+                    className="px-3 py-2 w-full md:w-72 rounded-xl bg-white border border-petro-line/50 text-sm text-petro-ink placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-petro-red/30 dark:bg-white/10 dark:border-white/15 dark:text-white dark:placeholder:text-white/40 dark:focus:ring-white/40"
                     placeholder="Filtrar por semana o empleado…"
                     value={filtroHistorialNominas}
                     onChange={(e) => setFiltroHistorialNominas(e.target.value)}
@@ -2121,7 +2453,7 @@ export default function App() {
                   {filtroHistorialNominas && (
                     <button
                       type="button"
-                      className="px-3 py-1.5 rounded-lg bg-white/10 border border-white/20 text-xs"
+                      className="px-3 py-1.5 rounded-lg bg-petro-line/30 border border-petro-line/60 text-xs text-petro-ink dark:bg-white/10 dark:border-white/20 dark:text-white"
                       onClick={() => setFiltroHistorialNominas("")}
                     >
                       Limpiar filtro
@@ -2129,19 +2461,19 @@ export default function App() {
                   )}
                 </div>
                 {nominasGuardadas.length === 0 ? (
-                  <p className="text-sm opacity-70">Aún no has guardado nóminas.</p>
+                  <p className="text-sm opacity-70 text-petro-ink/70 dark:text-white/70">Aún no has guardado nóminas.</p>
                 ) : (
                   <div className="overflow-x-auto">
                     <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
-                      <span className="inline-flex items-center gap-2 rounded-full bg-white/20 dark:bg-white/10 px-3 py-1 font-medium text-white">
+                      <span className="inline-flex items-center gap-2 rounded-full bg-petro-line/30 text-petro-ink px-3 py-1 font-medium dark:bg-white/10 dark:text-white">
                         Empleados únicos en historial: {empleadosHistorialNominas.length}
                       </span>
                       {empleadosHistorialNominas.length > 0 && (
-                        <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto text-[11px] text-white/80">
+                        <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto text-[11px] text-petro-ink dark:text-white/80">
                           {empleadosHistorialNominas.map((nombre) => (
                             <span
                               key={nombre}
-                              className="inline-flex items-center rounded-full border border-white/20 px-2 py-[2px]"
+                              className="inline-flex items-center rounded-full border border-petro-line/60 px-2 py-[2px] text-petro-ink dark:border-white/20 dark:text-white/80"
                             >
                               {nombre}
                             </span>
@@ -2149,9 +2481,9 @@ export default function App() {
                         </div>
                       )}
                     </div>
-                    <table className="w-full border-collapse text-sm bg-[#1b1b1b] rounded-xl overflow-hidden min-w-[760px]">
+                    <table className="w-full border-collapse text-sm bg-white rounded-xl overflow-hidden min-w-[760px] text-petro-ink dark:bg-[#1b1b1b] dark:text-gray-100">
                       <thead>
-                        <tr className="bg-petro-red text-white">
+                        <tr className="bg-gradient-to-r from-petro-red to-petro-redDark text-white">
                           <th className="p-2 text-left">Semana</th>
                           <th className="p-2 text-left">Empleados</th>
                           <th className="p-2 text-right">Descuento</th>
@@ -2171,12 +2503,17 @@ export default function App() {
                           );
                           const netoEstimado = round2(safeNumber(nomina.totalGeneral) - totalDescuento);
                           return (
-                            <tr key={index} className="border-t border-gray-700 hover:bg-[#2B2B2B]">
-                              <td className="p-2 font-semibold">{nomina.semana}</td>
+                            <tr
+                              key={index}
+                              className="border-t border-petro-line/40 hover:bg-petro-line/20 dark:border-gray-700 dark:hover:bg-[#2b2b2b]"
+                            >
+                              <td className="p-2 font-semibold text-petro-redDark dark:text-white">
+                                {nomina.semana}
+                              </td>
 
                               <td className="p-2">
                                 <div className="flex flex-col gap-1.5">
-                                  <div className="text-xs text-white/60">
+                                  <div className="text-xs text-petro-ink/70 dark:text-white/60">
                                     {nomina.empleados.length > 0
                                       ? resumirNombres(
                                           nomina.empleados
@@ -2188,7 +2525,7 @@ export default function App() {
                                   <div className="flex flex-wrap gap-2">
                                     <button
                                       onClick={() => setDetalleNomina(nomina)}
-                                      className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs md:text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                                      className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs md:text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                                       disabled={nomina.empleados.length === 0}
                                     >
                                       👁️ Ver detalles
@@ -2219,27 +2556,29 @@ export default function App() {
 
                               <td className="p-2 text-right">
                                 {totalDescuento > 0 ? (
-                                  <div className="inline-flex flex-col items-end rounded-lg bg-emerald-500/15 px-2 py-1 text-xs text-emerald-300 border border-emerald-500/30">
+                                  <div className="inline-flex flex-col items-end rounded-lg bg-emerald-500/10 px-2 py-1 text-xs text-emerald-600 border border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
                                     <span>-${fmt(totalDescuento)}</span>
                                     {totalPendiente > 0 && (
-                                      <span className="text-[11px] opacity-80">Pendiente ${fmt(totalPendiente)}</span>
+                                      <span className="text-[11px] opacity-80">
+                                        Pendiente ${fmt(totalPendiente)}
+                                      </span>
                                     )}
                                   </div>
                                 ) : (
                                   <span className="text-xs opacity-50">—</span>
                                 )}
                               </td>
-                              <td className="p-2 text-center font-bold text-green-400">
+                              <td className="p-2 text-center font-bold text-green-600 dark:text-green-400">
                                 <div className="flex flex-col items-center">
                                   <span>${fmt(nomina.totalGeneral)}</span>
                                   {totalDescuento > 0 && (
-                                    <span className="text-[11px] text-emerald-200">
+                                    <span className="text-[11px] text-emerald-600 dark:text-emerald-200">
                                       Neto: ${fmt(netoEstimado)}
                                     </span>
                                   )}
                                 </div>
                               </td>
-                              <td className="p-2 text-gray-400">
+                              <td className="p-2 text-petro-ink/70 dark:text-gray-400">
                                 {(() => {
                                   const fecha = nomina.fechaRegistro || nomina.createdAt;
                                   return fecha ? new Date(fecha).toLocaleDateString() : "Sin fecha";
@@ -3147,14 +3486,14 @@ export default function App() {
           )}
           {detalleNomina && (
             <div className="fixed inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm z-50">
-              <div className="bg-[#1E1E1E] w-[800px] max-h-[90vh] overflow-y-auto rounded-2xl p-6 shadow-xl border border-gray-700">
-                <h2 className="text-2xl font-bold text-amber-400 mb-4">
+              <div className="w-[800px] max-h-[90vh] overflow-y-auto rounded-2xl p-6 shadow-xl border border-petro-line/50 bg-white text-petro-ink dark:bg-[#1E1E1E] dark:text-white dark:border-gray-700">
+                <h2 className="text-2xl font-bold text-petro-redDark dark:text-amber-400 mb-4">
                   Detalles de {detalleNomina.semana}
                 </h2>
 
                 {Array.isArray(detalleNomina.empleados) && detalleNomina.empleados.length > 0 ? (
-                  <table className="w-full border-collapse text-sm">
-                    <thead className="bg-[#A52A2A] text-gray-100">
+                  <table className="w-full border-collapse text-sm rounded-xl overflow-hidden">
+                    <thead className="bg-gradient-to-r from-petro-red to-petro-redDark text-white">
                       <tr>
                         <th className="p-2 text-left">Empleado</th>
                         <th className="p-2 text-left">Horas primarias</th>
@@ -3167,38 +3506,47 @@ export default function App() {
                         <th className="p-2 text-left text-green-400">Total final</th>
                       </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="bg-white dark:bg-[#121212]">
                       {detalleNomina.empleados.map((e: NominaEmpleado, i: number) => (
-                        <tr key={i} className="border-b border-gray-700 hover:bg-[#2B2B2B]">
-                          <td className="p-2 font-semibold text-amber-300">{e.nombre ?? "Sin nombre"}</td>
+                        <tr
+                          key={i}
+                          className="border-b border-petro-line/40 hover:bg-petro-line/15 dark:border-gray-700 dark:hover:bg-[#2B2B2B]"
+                        >
+                          <td className="p-2 font-semibold text-petro-redDark dark:text-amber-300">
+                            {e.nombre ?? "Sin nombre"}
+                          </td>
                           <td className="p-2">{fmt(Number(e.total_horas_primarias ?? 0))}</td>
                           <td className="p-2">{fmt(Number(e.horas_extras ?? 0))}</td>
                           <td className="p-2">${fmt(Number(e.costo_hora_primaria ?? 0))}</td>
                           <td className="p-2">${fmt(Number(e.bono_semanal ?? 0))}</td>
                           <td className="p-2">${fmt(Number(e.bono_mensual ?? 0))}</td>
                           <td className="p-2">${fmt(Number(e.comision ?? e.comisiones ?? 0))}</td>
-                          <td className="p-2 text-red-400">-${fmt(Number(e.descuentos ?? 0))}</td>
-                          <td className="p-2 font-bold text-green-400">${fmt(Number(e.total_final ?? 0))}</td>
+                          <td className="p-2 text-red-600 dark:text-red-400">
+                            -${fmt(Number(e.descuentos ?? 0))}
+                          </td>
+                          <td className="p-2 font-bold text-green-600 dark:text-green-400">
+                            ${fmt(Number(e.total_final ?? 0))}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 ) : (
-                  <p className="text-sm text-white/80">
+                  <p className="text-sm text-petro-ink/80 dark:text-white/80">
                     Esta nómina no incluye empleados para mostrar.
                   </p>
                 )}
 
-                <div className="mt-6 flex justify-between items-center border-t border-gray-700 pt-4">
-                  <p className="text-lg font-semibold text-gray-300">
+                <div className="mt-6 flex justify-between items-center border-t border-petro-line/40 pt-4 dark:border-gray-700">
+                  <p className="text-lg font-semibold text-petro-ink dark:text-gray-300">
                     Total general:&nbsp;
-                    <span className="text-green-400">
+                    <span className="text-green-600 dark:text-green-400">
                       ${fmt(Number(detalleNomina.totalGeneral ?? 0))}
                     </span>
                   </p>
                   <button
                     onClick={() => setDetalleNomina(null)}
-                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg"
+                    className="px-4 py-2 rounded-lg bg-petro-red text-white hover:bg-petro-redDark dark:bg-gray-700 dark:hover:bg-gray-600"
                   >
                     Cerrar
                   </button>
