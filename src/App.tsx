@@ -63,6 +63,145 @@ type ManualBonusFlags = {
   mensual: boolean;
 };
 
+type SectionNavItem = {
+  key: Section;
+  label: string;
+  description: string;
+  icon: string;
+};
+
+type SectionGuideStep = {
+  badge: string;
+  label: string;
+  detail: string;
+};
+
+type SectionGuideInfo = {
+  title: string;
+  subtitle: string;
+  helper: string;
+  steps: SectionGuideStep[];
+};
+
+const SECTION_NAV_ITEMS: SectionNavItem[] = [
+  {
+    key: "nominas",
+    label: "Nóminas",
+    description: "Filtra, ajusta y exporta pagos.",
+    icon: "🧾",
+  },
+  {
+    key: "checkin",
+    label: "Check-in",
+    description: "Horas por día al instante.",
+    icon: "⏱️",
+  },
+  {
+    key: "empleados",
+    label: "Equipo",
+    description: "Perfiles, extras y préstamos.",
+    icon: "👥",
+  },
+  {
+    key: "billetes",
+    label: "Billetes",
+    description: "Entregas en efectivo controladas.",
+    icon: "💵",
+  },
+];
+
+const SECTION_GUIDES: Record<Section, SectionGuideInfo> = {
+  nominas: {
+    title: "Nóminas listas en minutos",
+    subtitle: "Filtra, revisa y exporta con total claridad.",
+    helper:
+      "Tip: usa la semana mostrada en el historial para mantener sincronía con check-in y descuentos.",
+    steps: [
+      {
+        badge: "Paso 1",
+        label: "Enfoca la semana correcta",
+        detail: "Busca por nombre o elige periodo para depurar la tabla antes de editar.",
+      },
+      {
+        badge: "Paso 2",
+        label: "Confirma columnas clave",
+        detail: "Selecciona las columnas de nombre y monto sugeridas automáticamente.",
+      },
+      {
+        badge: "Paso 3",
+        label: "Exporta o edita",
+        detail: "Abre el historial, lanza el editor o exporta a CSV cuando estés conforme.",
+      },
+    ],
+  },
+  checkin: {
+    title: "Check-in sin estrés",
+    subtitle: "Captura entradas/salidas y genera el resumen semanal.",
+    helper: "Consejo: guarda cada día apenas termines para evitar retrabajos.",
+    steps: [
+      {
+        badge: "Paso 1",
+        label: "Define la semana",
+        detail: "Escribe el identificador y activa los días que vas a capturar.",
+      },
+      {
+        badge: "Paso 2",
+        label: "Carga nombres y horarios",
+        detail: "Usa la lista de empleados y las alertas visuales para validar entradas.",
+      },
+      {
+        badge: "Paso 3",
+        label: "Guarda y cierra",
+        detail: "Registra cada día y cierra la semana cuando esté completa para exportar a nómina.",
+      },
+    ],
+  },
+  empleados: {
+    title: "Control total del equipo",
+    subtitle: "Consulta, actualiza y otorga extras desde un solo lugar.",
+    helper: "Tip: abre los datos extra para mantener dirección, RFC y préstamos al día.",
+    steps: [
+      {
+        badge: "Paso 1",
+        label: "Ubica al colaborador",
+        detail: "Filtra por nombre o estado para entender su situación actual.",
+      },
+      {
+        badge: "Paso 2",
+        label: "Actualiza datos clave",
+        detail: "Edita tipo de pago, bonos y campos fiscales sin perder contexto.",
+      },
+      {
+        badge: "Paso 3",
+        label: "Gestiona extras",
+        detail: "Crea o liquida préstamos y bonificaciones desde el mismo panel.",
+      },
+    ],
+  },
+  billetes: {
+    title: "Entrega de efectivo impecable",
+    subtitle: "Arma paquetes de billetes y deja un rastro claro.",
+    helper: "Consejo: guarda una nota corta cada vez para recordar el propósito de la entrega.",
+    steps: [
+      {
+        badge: "Paso 1",
+        label: "Elige la mezcla",
+        detail: "Ajusta las cantidades de cada denominación y verifica el total.",
+      },
+      {
+        badge: "Paso 2",
+        label: "Agrega contexto",
+        detail: "Escribe una nota breve para saber quién recibió y por qué.",
+      },
+      {
+        badge: "Paso 3",
+        label: "Registra y exporta",
+        detail: "Guarda la entrega y descarga el CSV cuando necesites compartirlo.",
+      },
+    ],
+  },
+};
+
 /* ───── Utilidades ─────────────────────────────────────────────── */
 function toCSV(rows: Row[]): string {
   if (!rows?.length) return "";
@@ -229,6 +368,8 @@ function useTheme() {
 export default function App() {
   const { dark, setDark } = useTheme();
   const [section, setSection] = useState<Section>("nominas");
+  const navItems = SECTION_NAV_ITEMS;
+  const sectionGuide = SECTION_GUIDES[section];
 
   // Título de semana (solo debajo de la tabla de nóminas)
   const [sectionTitle, setSectionTitle] = useState<string>("");
@@ -1398,7 +1539,7 @@ export default function App() {
       const dayKey = DAY_NAME_TO_KEY[dia];
       if (!dayKey) return;
       const defaults = DAY_DEFAULTS[dayKey];
-      template[dia] = Array.from({ length: rowsPerDay }, (_, idx) => {
+      template[dia] = Array.from({ length: rowsPerDay }, () => {
         const base = createEmptyCheckRow();
         base.nombre = "";
         base[dayKey] = { in: defaults.in, out: defaults.out };
@@ -1577,28 +1718,41 @@ export default function App() {
           <div className="rounded-2xl p-3 bg-gradient-to-b from-petro-redDark to-petro-red text-white shadow-xl ring-1 ring-white/30">
             <div className="px-2 py-2 text-sm/relaxed opacity-90">Navegación</div>
             <nav className="space-y-2 mt-1">
-              {(["nominas", "checkin", "empleados", "billetes"] as Section[]).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setSection(s)}
-                  className={`w-full text-left px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 transition ${
-                    section === s ? "ring-2 ring-white/60" : ""
-                  }`}
-                >
-                  {s === "nominas"
-                    ? "Nóminas"
-                    : s === "checkin"
-                    ? "Check-in"
-                    : s === "empleados"
-                    ? "Empleados"
-                    : "Billetes"}
-                </button>
-              ))}
+              {navItems.map((item, idx) => {
+                const isActive = item.key === section;
+                return (
+                  <button
+                    key={item.key}
+                    onClick={() => setSection(item.key)}
+                    className={`w-full text-left px-4 py-3 rounded-2xl border transition duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 ${
+                      isActive
+                        ? "bg-white/25 text-white shadow-lg border-white/40"
+                        : "bg-white/5 text-white/90 border-white/10 hover:bg-white/15"
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span
+                        className={`text-xl ${isActive ? "scale-110" : ""}`}
+                        aria-hidden="true"
+                      >
+                        {item.icon}
+                      </span>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold leading-tight">{item.label}</p>
+                        <p className="text-xs opacity-80 leading-snug">{item.description}</p>
+                      </div>
+                    </div>
+                    <span className="mt-2 inline-block text-[10px] uppercase tracking-[0.3em] opacity-70">
+                      Paso 0{idx + 1}
+                    </span>
+                  </button>
+                );
+              })}
             </nav>
-            <div className="mt-4 text-xs/relaxed px-2 py-2 bg-white/10 rounded-xl">
-              <div className="opacity-80">Consejo</div>
-              <div className="opacity-75">
-                Captura entradas/salidas en “Check-in” y guarda el día.
+            <div className="mt-4 text-xs/relaxed px-3 py-3 bg-white/10 rounded-xl border border-white/20">
+              <div className="text-[11px] uppercase tracking-[0.2em] opacity-80">Consejo</div>
+              <div className="opacity-90 leading-relaxed">
+                {sectionGuide?.helper ?? "Elige una sección para ver la guía."}
               </div>
             </div>
           </div>
@@ -1606,6 +1760,30 @@ export default function App() {
 
         {/* MAIN */}
         <main className="space-y-6">
+          <div className="md:hidden -mx-1">
+            <nav className="flex gap-2 overflow-x-auto pb-2 px-1">
+              {navItems.map((item) => {
+                const isActive = item.key === section;
+                return (
+                  <button
+                    key={item.key}
+                    onClick={() => setSection(item.key)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-2xl border text-sm font-semibold transition ${
+                      isActive
+                        ? "bg-petro-red text-white border-transparent shadow-md dark:bg-petro-redDark"
+                        : "bg-white text-petro-ink border-petro-line/70 dark:bg-white/10 dark:text-white dark:border-white/20"
+                    }`}
+                  >
+                    <span aria-hidden="true">{item.icon}</span>
+                    {item.label}
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+
+          {sectionGuide && <SectionGuide info={sectionGuide} />}
+
           {/* ─────────────── CHECK-IN ─────────────── */}
           {section === "checkin" && (
             <div className="space-y-4">
@@ -2233,91 +2411,150 @@ export default function App() {
           {section === "nominas" && (
             <>
               {/* TOOLBAR */}
-              <div className="rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/70 dark:bg-white/5 backdrop-blur">
-                <div className="flex flex-wrap gap-3 items-center">
-                  <input
-                    className="px-3 py-2 w-72 rounded-xl bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-petro-red"
-                    placeholder="Buscar en todo…"
-                    value={q}
-                    onChange={(e) => {
-                      setQ(e.target.value);
-                      setPage(0);
-                    }}
-                  />
-                  <select
-                    className="px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                    value={nameCol}
-                    onChange={(e) => setNameCol(e.target.value)}
-                  >
-                    <option value="">Columna de nombre…</option>
-                    {textCols.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className="px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                    value={amountCol}
-                    onChange={(e) => setAmountCol(e.target.value)}
-                  >
-                    <option value="">Columna de monto…</option>
-                    {numericCols.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
+              <div className="rounded-2xl p-5 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur space-y-4">
+                <header className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.3em] text-petro-ink/60 dark:text-white/60">
+                      Explorador de nóminas
+                    </p>
+                    <h2 className="text-lg font-semibold text-petro-redDark dark:text-white">
+                      Filtra y enfócate antes de editar
+                    </h2>
+                    <p className="text-sm text-petro-ink/70 dark:text-white/70">
+                      Ajusta los selectores en segundos y evita tocar columnas equivocadas.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-[11px] uppercase tracking-wide text-petro-ink/70 dark:text-white/60">
+                    <span className="inline-flex items-center gap-2 rounded-full border border-petro-line/70 px-3 py-1 bg-white/60 dark:bg-white/10 dark:border-white/15">
+                      Semana foco: {sectionTitle || "Sin semana"}
+                    </span>
+                    <span className="inline-flex items-center gap-2 rounded-full border border-petro-line/70 px-3 py-1 bg-white/60 dark:bg-white/10 dark:border-white/15">
+                      Columnas totales: {columns.length}
+                    </span>
+                    <span className="inline-flex items-center gap-2 rounded-full border border-petro-line/70 px-3 py-1 bg-white/60 dark:bg-white/10 dark:border-white/15">
+                      Numéricas: {numericCols.length}
+                    </span>
+                  </div>
+                </header>
 
-                  <select
-                    className="px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-petro-line/60 dark:border-white/10"
-                    value={periodo}
-                    onChange={(e) => {
-                      setPeriodo(e.target.value);
-                      setPage(0);
-                    }}
-                    disabled={!periodoCol}
-                    title={
-                      periodoCol
-                        ? `Usando columna: ${periodoCol}`
-                        : "No se detectó columna de periodo"
-                    }
-                  >
-                    <option value="">
-                      {periodoCol ? "Todos los periodos" : "Sin columna de periodo"}
-                    </option>
-                    {periodosUnicos.map((p) => (
-                      <option key={p} value={p}>
-                        {p}
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                  <label className="flex flex-col gap-1 text-xs font-semibold text-petro-ink/80 dark:text-white/80">
+                    Buscar en todo
+                    <input
+                      className="px-3 py-2 rounded-xl border border-petro-line/60 dark:border-white/10 bg-white text-sm text-petro-ink placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-petro-red/40 dark:bg-white/5 dark:text-white"
+                      placeholder="Nombre, puesto o semana…"
+                      value={q}
+                      onChange={(e) => {
+                        setQ(e.target.value);
+                        setPage(0);
+                      }}
+                    />
+                  </label>
+
+                  <label className="flex flex-col gap-1 text-xs font-semibold text-petro-ink/80 dark:text-white/80">
+                    Columna de nombre
+                    <select
+                      className="px-3 py-2 rounded-xl border border-petro-line/60 dark:border-white/10 bg-white text-sm dark:bg-white/5 dark:text-white"
+                      value={nameCol}
+                      onChange={(e) => setNameCol(e.target.value)}
+                    >
+                      <option value="">Detectar automáticamente…</option>
+                      {textCols.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-[11px] font-normal text-petro-ink/60 dark:text-white/60">
+                      Texto detectado: {textCols.length}
+                    </span>
+                  </label>
+
+                  <label className="flex flex-col gap-1 text-xs font-semibold text-petro-ink/80 dark:text-white/80">
+                    Columna de monto
+                    <select
+                      className="px-3 py-2 rounded-xl border border-petro-line/60 dark:border-white/10 bg-white text-sm dark:bg-white/5 dark:text-white"
+                      value={amountCol}
+                      onChange={(e) => setAmountCol(e.target.value)}
+                    >
+                      <option value="">Detectar automáticamente…</option>
+                      {numericCols.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-[11px] font-normal text-petro-ink/60 dark:text-white/60">
+                      Números detectados: {numericCols.length}
+                    </span>
+                  </label>
+
+                  <label className="flex flex-col gap-1 text-xs font-semibold text-petro-ink/80 dark:text-white/80">
+                    Periodo
+                    <select
+                      className="px-3 py-2 rounded-xl border border-petro-line/60 dark:border-white/10 bg-white text-sm disabled:opacity-50 dark:bg-white/5 dark:text-white"
+                      value={periodo}
+                      onChange={(e) => {
+                        setPeriodo(e.target.value);
+                        setPage(0);
+                      }}
+                      disabled={!periodoCol}
+                      title={
+                        periodoCol
+                          ? `Usando columna: ${periodoCol}`
+                          : "No se detectó columna de periodo"
+                      }
+                    >
+                      <option value="">
+                        {periodoCol ? "Todos los periodos" : "Sin columna de periodo"}
                       </option>
-                    ))}
-                  </select>
+                      {periodosUnicos.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-[11px] font-normal text-petro-ink/60 dark:text-white/60">
+                      {periodoCol ? `Columna: ${periodoCol}` : "Activa un periodo desde la hoja"}
+                    </span>
+                  </label>
+                </div>
 
-                  <button
-                    className="ml-auto px-4 py-2 rounded-xl bg-gradient-to-r from-petro-red to-petro-redDark text-white shadow hover:shadow-lg active:scale-[0.98] transition"
-                    onClick={() => {
-                      const csv = toCSV(datosPeriodo);
-                      const blob = new Blob([csv], { type: "text/csv" });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement("a");
-                      a.href = url;
-                      a.download = periodo
-                        ? `nominas_${periodo}.csv`
-                        : "nominas_todos.csv";
-                      a.click();
-                      URL.revokeObjectURL(url);
-                    }}
-                    disabled={!datosPeriodo.length}
-                  >
-                    Exportar CSV
-                  </button>
-
-                  <button
-                    className="px-4 py-2 rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 hover:bg-white"
-                    onClick={abrirModalDescuento}
-                  >
-                    Descontar préstamo
-                  </button>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap gap-2 text-xs text-petro-ink/70 dark:text-white/70">
+                    <span className="inline-flex items-center gap-2 rounded-full border border-petro-line/70 px-3 py-1 bg-white/60 dark:bg-white/10 dark:border-white/15">
+                      Periodo activo: {periodo || "Todos"}
+                    </span>
+                    {periodoCol && (
+                      <span className="inline-flex items-center gap-2 rounded-full border border-petro-line/70 px-3 py-1 bg-white/60 dark:bg-white/10 dark:border-white/15">
+                        Columna periodo: {periodoCol}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className="px-4 py-2 rounded-xl bg-white/90 dark:bg-white/10 border border-petro-line/60 dark:border-white/15 hover:bg-white text-sm"
+                      onClick={abrirModalDescuento}
+                    >
+                      Descontar préstamo
+                    </button>
+                    <button
+                      className="px-4 py-2 rounded-xl bg-gradient-to-r from-petro-red to-petro-redDark text-white shadow hover:shadow-lg active:scale-[0.98] transition text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                      onClick={() => {
+                        const csv = toCSV(datosPeriodo);
+                        const blob = new Blob([csv], { type: "text/csv" });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = periodo ? `nominas_${periodo}.csv` : "nominas_todos.csv";
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                      disabled={!datosPeriodo.length}
+                    >
+                      Exportar CSV
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -3583,5 +3820,37 @@ function MetricCard({
         </div>
       </div>
     </div>
+  );
+}
+
+function SectionGuide({ info }: { info?: SectionGuideInfo }) {
+  if (!info) return null;
+  return (
+    <section className="rounded-3xl p-5 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/90 dark:bg-[#0c111d]/80 backdrop-blur space-y-4">
+      <div className="space-y-2">
+        <span className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.3em] text-petro-ink/60 dark:text-white/60">
+          Guía express
+        </span>
+        <h1 className="text-2xl font-bold text-petro-redDark dark:text-white">{info.title}</h1>
+        <p className="text-sm text-petro-ink/80 dark:text-white/80">{info.subtitle}</p>
+        <p className="text-xs text-petro-ink/60 dark:text-white/60">{info.helper}</p>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {info.steps.map((step) => (
+          <article
+            key={step.label}
+            className="rounded-2xl border border-petro-line/60 dark:border-white/10 bg-white/80 dark:bg-white/5 p-4 shadow-sm"
+          >
+            <span className="inline-flex items-center rounded-full bg-petro-line/60 dark:bg-white/10 px-3 py-1 text-[11px] uppercase tracking-wide text-petro-ink/60 dark:text-white/60">
+              {step.badge}
+            </span>
+            <h3 className="mt-2 text-base font-semibold text-petro-ink dark:text-white">
+              {step.label}
+            </h3>
+            <p className="mt-1 text-sm text-petro-ink/80 dark:text-white/70">{step.detail}</p>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
