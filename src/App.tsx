@@ -83,6 +83,46 @@ type SectionGuideInfo = {
   steps: SectionGuideStep[];
 };
 
+type AlertVariant = "info" | "success" | "warning" | "error";
+type ModalAlert = {
+  message: string;
+  variant: AlertVariant;
+};
+
+const ALERT_STYLES: Record<
+  AlertVariant,
+  { icon: string; accent: string; button: string; badge: string; label: string }
+> = {
+  info: {
+    icon: "ℹ️",
+    accent: "text-sky-700",
+    button: "bg-sky-600 hover:bg-sky-700 focus-visible:ring-sky-400",
+    badge: "bg-sky-100 text-sky-700",
+    label: "Aviso",
+  },
+  success: {
+    icon: "✅",
+    accent: "text-emerald-700",
+    button: "bg-emerald-600 hover:bg-emerald-700 focus-visible:ring-emerald-400",
+    badge: "bg-emerald-100 text-emerald-700",
+    label: "Listo",
+  },
+  warning: {
+    icon: "⚠️",
+    accent: "text-amber-700",
+    button: "bg-amber-600 hover:bg-amber-700 focus-visible:ring-amber-400",
+    badge: "bg-amber-100 text-amber-700",
+    label: "Atención",
+  },
+  error: {
+    icon: "❌",
+    accent: "text-rose-700",
+    button: "bg-rose-600 hover:bg-rose-700 focus-visible:ring-rose-400",
+    badge: "bg-rose-100 text-rose-700",
+    label: "Ups…",
+  },
+};
+
 const SECTION_NAV_ITEMS: SectionNavItem[] = [
   {
     key: "nominas",
@@ -375,6 +415,7 @@ export default function App() {
   const [sectionTitle, setSectionTitle] = useState<string>("");
   const [showTopTotales, setShowTopTotales] = useState(false);
   const [showNominasTable, setShowNominasTable] = useState(false);
+  const [modalAlert, setModalAlert] = useState<ModalAlert | null>(null);
 
   // Datos nómina
   const [rawData, setRawData] = useState<Row[]>([]);
@@ -406,6 +447,25 @@ export default function App() {
     rfc: "",
     curp: "",
   });
+  const showAlert = useCallback(
+    (message: string, variant: AlertVariant = "info") => {
+      setModalAlert({ message, variant });
+    },
+    []
+  );
+  const closeAlert = useCallback(() => setModalAlert(null), []);
+
+  useEffect(() => {
+    if (!modalAlert) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeAlert();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [modalAlert, closeAlert]);
+  const currentAlertStyle = modalAlert ? ALERT_STYLES[modalAlert.variant] : null;
   const refrescarNominas = useCallback(async () => {
     try {
       const data = await getNominas();
@@ -623,10 +683,10 @@ export default function App() {
       setEmpleados(updated);
 
       // Feedback visual
-      alert(`Empleado "${saved.nombre}" creado correctamente ✅`);
+      showAlert(`Empleado "${saved.nombre}" creado correctamente ✅`, "success");
     } catch (err) {
       console.error("❌ Error al crear empleado:", err);
-      alert("Error al crear empleado. Ver consola.");
+      showAlert("Error al crear empleado. Ver consola.", "error");
     }
   }
 
@@ -665,7 +725,7 @@ export default function App() {
       setExtraEmpleado(null);
     } catch (err) {
       console.error("❌ Error al actualizar datos extra del empleado:", err);
-      alert("No se pudieron guardar los datos extra. Revisa la consola.");
+      showAlert("No se pudieron guardar los datos extra. Revisa la consola.", "error");
     }
   }
 
@@ -702,11 +762,11 @@ export default function App() {
 
   async function guardarDescuentoNomina() {
     if (!nominaObjetivoId) {
-      alert("Selecciona un empleado de la nómina.");
+      showAlert("Selecciona un empleado de la nómina.", "warning");
       return;
     }
     if (!Number.isFinite(descuentoPropuesto) || !Number.isFinite(pendientePropuesto)) {
-      alert("Ingresa valores numéricos válidos para descuento y pendiente.");
+      showAlert("Ingresa valores numéricos válidos para descuento y pendiente.", "warning");
       return;
     }
     try {
@@ -716,11 +776,11 @@ export default function App() {
         pendiente_descuento: round2(pendientePropuesto),
       });
       await refrescarNominas();
-      alert("✅ Descuento actualizado");
+      showAlert("✅ Descuento actualizado", "success");
       cerrarModalDescuento();
     } catch (err) {
       console.error("❌ Error al actualizar nómina:", err);
-      alert("No se pudo actualizar la nómina. Ver consola.");
+      showAlert("No se pudo actualizar la nómina. Ver consola.", "error");
     } finally {
       setGuardandoDescuento(false);
     }
@@ -751,7 +811,7 @@ export default function App() {
       setPrestamos((prev) => [nuevo, ...prev]);
     } catch (err) {
       console.error("❌ Error al crear préstamo:", err);
-      alert("Error al crear préstamo. Ver consola.");
+      showAlert("Error al crear préstamo. Ver consola.", "error");
     }
   }
 
@@ -1489,12 +1549,12 @@ export default function App() {
   function abrirEditorNominaSemanaObjetivo(nomina: NominaSemana) {
     const semana = (nomina.semana ?? "").trim();
     if (!semana) {
-      alert("No se puede editar una nómina sin semana identificada.");
+      showAlert("No se puede editar una nómina sin semana identificada.", "warning");
       return;
     }
     const registros = nominasPorSemana.get(semana) ?? [];
     if (!registros.length) {
-      alert("No se encontraron registros asociados a esta semana.");
+      showAlert("No se encontraron registros asociados a esta semana.", "warning");
       return;
     }
     setEditNominaSemana(semana);
@@ -1522,7 +1582,7 @@ export default function App() {
   async function guardarEdicionNominaSemana() {
     if (!editNominaSemana) return;
     if (!editNominaOriginal.length || editNominaOriginal.length !== editNominaRows.length) {
-      alert("No hay datos válidos para guardar.");
+      showAlert("No hay datos válidos para guardar.", "warning");
       return;
     }
     try {
@@ -1569,11 +1629,11 @@ export default function App() {
         totalGeneral,
       });
       await refrescarNominas();
-      alert("✅ Nómina actualizada");
+      showAlert("✅ Nómina actualizada", "success");
       cerrarEditorNomina();
     } catch (err) {
       console.error("❌ Error al actualizar nómina:", err);
-      alert("No se pudo actualizar la nómina. Revisa la consola para más detalles.");
+      showAlert("No se pudo actualizar la nómina. Revisa la consola para más detalles.", "error");
     } finally {
       setEditNominaSaving(false);
     }
@@ -1582,7 +1642,7 @@ export default function App() {
   async function eliminarNominaSemana(semana: string) {
     const normalizada = (semana ?? "").trim();
     if (!normalizada) {
-      alert("Semana inválida. No se puede eliminar la nómina.");
+      showAlert("Semana inválida. No se puede eliminar la nómina.", "warning");
       return;
     }
     if (typeof window !== "undefined") {
@@ -1596,13 +1656,13 @@ export default function App() {
       setDeleteSemanaTarget(normalizada);
       await deleteNominasBySemana(normalizada);
       await refrescarNominas();
-      alert(`✅ Nómina de "${normalizada}" eliminada.`);
+      showAlert(`✅ Nómina de "${normalizada}" eliminada.`, "success");
       if (editNominaSemana === normalizada) {
         cerrarEditorNomina();
       }
     } catch (err) {
       console.error("❌ Error al eliminar nómina:", err);
-      alert("No se pudo eliminar la nómina. Revisa la consola para más detalles.");
+      showAlert("No se pudo eliminar la nómina. Revisa la consola para más detalles.", "error");
     } finally {
       setDeleteNominaLoading(false);
       setDeleteSemanaTarget(null);
@@ -1654,7 +1714,7 @@ export default function App() {
     }
     const dia = diasActivos[diasActivos.length - 1];
     if (!dia) {
-      alert("Agrega un día antes de insertar filas.");
+      showAlert("Agrega un día antes de insertar filas.", "warning");
       return;
     }
     updateDiaRows(dia, (rows) => [...rows, createEmptyCheckRow()]);
@@ -1695,7 +1755,7 @@ export default function App() {
     try {
       const semana = semanaCheckin.trim();
       if (!semana) {
-        alert("Define un título de semana antes de guardar.");
+        showAlert("Define un título de semana antes de guardar.", "warning");
         setDaySaveState((prev) => ({ ...prev, [dia]: "idle" }));
         return;
       }
@@ -1710,7 +1770,7 @@ export default function App() {
       }));
 
       if (!registros.length) {
-        alert("⚠️ No hay registros para guardar.");
+        showAlert("⚠️ No hay registros para guardar.", "warning");
         setDaySaveState((prev) => ({ ...prev, [dia]: "idle" }));
         return;
       }
@@ -1719,11 +1779,11 @@ export default function App() {
       await createCheckins(registros);
       await cargarHistorial(true);
       setDaySaveState((prev) => ({ ...prev, [dia]: "saved" }));
-      alert(`✅ Check-ins del ${dia} guardados correctamente.`);
+      showAlert(`✅ Check-ins del ${dia} guardados correctamente.`, "success");
     } catch (err) {
       console.error("❌ Error al guardar check-ins:", err);
       setDaySaveState((prev) => ({ ...prev, [dia]: "idle" }));
-      alert("Error al guardar check-ins. Ver consola.");
+      showAlert("Error al guardar check-ins. Ver consola.", "error");
     }
   }
 
@@ -1795,7 +1855,7 @@ export default function App() {
 
   function registrarEntrega() {
     if (totalBilletes <= 0) {
-      alert("Captura al menos un billete.");
+      showAlert("Captura al menos un billete.", "warning");
       return;
     }
     const entry: BilletesEntry = {
@@ -2002,9 +2062,9 @@ export default function App() {
                       const select = document.getElementById("nuevo-dia") as HTMLSelectElement | null;
                       if (!select) return;
                       const dia = select.value;
-                      if (!dia) return alert("Selecciona un día antes de agregar.");
+                      if (!dia) return showAlert("Selecciona un día antes de agregar.", "warning");
                       if (diasActivos.includes(dia))
-                        return alert(`⚠️ El día ${dia} ya está agregado.`);
+                        return showAlert(`⚠️ El día ${dia} ya está agregado.`, "warning");
 
                       setDiasActivos((prev) => [...prev, dia]);
                       setCheckData((prev) => ({
@@ -2429,7 +2489,7 @@ export default function App() {
                     try {
                       const semana = semanaCheckin.trim();
                       if (!semana) {
-                        alert("Indica el nombre de la semana antes de cerrar.");
+                        showAlert("Indica el nombre de la semana antes de cerrar.", "warning");
                         return;
                       }
                       const semanaNominaFinal = (semanaNomina || "").trim() || semana;
@@ -2439,8 +2499,9 @@ export default function App() {
                       const payload = crearNominaDesdeResumen(resumen, semanaNominaFinal);
 
                       if (!payload.empleados.length) {
-                        alert(
-                          `⚠️ Semana "${resumen.semana}" cerrada, pero no se encontraron empleados para generar nómina automática.`
+                        showAlert(
+                          `⚠️ Semana "${resumen.semana}" cerrada, pero no se encontraron empleados para generar nómina automática.`,
+                          "warning"
                         );
                         return;
                       }
@@ -2453,18 +2514,19 @@ export default function App() {
                       setSemanaCheckin(semanaFinal);
                       setSemanaNominaTouched(false);
                       setSemanaNomina(semanaFinal);
-                      alert(
+                      showAlert(
                         [
                           `✅ ${resumen.message}`,
                           `Registros de check-in: ${resumen.totalRegistros}`,
                           `Empleados en nómina: ${payload.empleados.length}`,
                           `Total estimado: $${fmt(payload.totalGeneral)}`,
-                        ].join("\n")
+                        ].join("\n"),
+                        "success"
                       );
                     } catch (err) {
                       console.error("❌ Error al cerrar semana:", err);
                       const message = err instanceof Error ? err.message : "No se pudo cerrar la semana.";
-                      alert(`No se pudo cerrar la semana. ${message}`);
+                      showAlert(`No se pudo cerrar la semana. ${message}`, "error");
                     }
                   }}
                 >
@@ -4127,6 +4189,36 @@ export default function App() {
           )}
         </main>
       </div>
+      {modalAlert && currentAlertStyle && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center px-4 py-6 bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-3xl shadow-2xl ring-1 ring-black/10 dark:ring-white/15 bg-white dark:bg-[#0b1020] p-6 space-y-4 text-center">
+            <div className="flex flex-col items-center gap-2">
+              <span className={`text-3xl ${currentAlertStyle.accent}`} aria-hidden="true">
+                {currentAlertStyle.icon}
+              </span>
+              <span
+                className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${currentAlertStyle.badge}`}
+              >
+                {currentAlertStyle.label}
+              </span>
+            </div>
+            <div className="text-sm text-petro-ink dark:text-white space-y-1">
+              {modalAlert.message.split("\n").map((line, idx) => (
+                <p key={idx}>{line}</p>
+              ))}
+            </div>
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={closeAlert}
+                className={`px-5 py-2 rounded-xl text-white font-semibold shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${currentAlertStyle.button}`}
+              >
+                Entendido
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
