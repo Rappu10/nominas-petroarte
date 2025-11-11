@@ -864,6 +864,18 @@ export default function App() {
   const [historialError, setHistorialError] = useState<string | null>(null);
   const [historialLoaded, setHistorialLoaded] = useState(false);
   const normalizarNombre = useCallback((nombre: string) => nombre.trim().toLowerCase(), []);
+  const nombresSemanaActual = useMemo(() => {
+    const set = new Set<string>();
+    diasActivos.forEach((dia) => {
+      const rows = checkData[dia] ?? [];
+      rows.forEach((row) => {
+        const nombre = row.nombre?.trim();
+        if (!nombre) return;
+        set.add(normalizarNombre(nombre));
+      });
+    });
+    return set;
+  }, [checkData, diasActivos, normalizarNombre]);
   const empleadoNombrePorId = useMemo(() => {
     const map = new Map<string, string>();
     empleados.forEach((emp) => {
@@ -1252,7 +1264,14 @@ export default function App() {
 
   const crearNominaDesdeResumen = useCallback(
     (resumen: CloseCheckinWeekResponse, semanaOverride?: string): NominaPayload => {
-      const empleadosNomina: NominaEmpleado[] = (resumen.empleados ?? []).map((registro) => {
+      const empleadosFuente = (resumen.empleados ?? []).filter((registro) => {
+        if (!nombresSemanaActual.size) return true;
+        const clave = normalizarNombre(registro.nombre?.trim() || "");
+        if (!clave) return false;
+        return nombresSemanaActual.has(clave);
+      });
+
+      const empleadosNomina: NominaEmpleado[] = empleadosFuente.map((registro) => {
         const nombre = registro.nombre?.trim() || "Sin nombre";
         const claveNombre = normalizarNombre(nombre);
         const bonos = claveNombre ? bonosAplicables.get(claveNombre) : undefined;
@@ -1332,7 +1351,7 @@ export default function App() {
         totalGeneral: round2(totalGeneral),
       };
     },
-    [bonosAplicables, empleados, extraMultiplier, extrasThreshold, normalizarNombre]
+    [bonosAplicables, empleados, extraMultiplier, extrasThreshold, normalizarNombre, nombresSemanaActual]
   );
 
   /* ───── Descuentos de nómina ─────────────────────────────────── */
@@ -2506,10 +2525,18 @@ export default function App() {
                         return;
                       }
 
+                      const semanaFinal = payload.semana.trim();
+                      try {
+                        if (semanaFinal) {
+                          await deleteNominasBySemana(semanaFinal);
+                        }
+                      } catch (err) {
+                        console.warn("⚠️ No se pudo limpiar la semana antes de guardar:", err);
+                      }
+
                       await createNomina(payload);
                       await refrescarNominas();
                       setSection("nominas");
-                      const semanaFinal = payload.semana.trim();
                       setSectionTitle(semanaFinal);
                       setSemanaCheckin(semanaFinal);
                       setSemanaNominaTouched(false);
@@ -2898,7 +2925,7 @@ export default function App() {
                   </div>
                   {rawData.length === 0 ? (
                     <p className="text-sm opacity-70">
-                      Cargando datos… asegúrate de tener <code>public/nominas_merged_clean.json</code>
+                      Cargando datos…
                     </p>
                   ) : !showNominasTable ? (
                     <p className="text-sm opacity-70">
