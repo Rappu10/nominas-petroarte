@@ -231,7 +231,7 @@ const fmt = (n: number) =>
     maximumFractionDigits: 2,
   }).format(n);
 
-const HIDDEN_COLUMNS = new Set(["__v"]);
+const HIDDEN_COLUMNS = new Set(["__v", "_id", "createdAt", "updatedAt", "fechaRegistro"]);
 
 /** Parse HH:MM o legacy 8,50 */
 function parseTimeToHours(input: string): number | null {
@@ -373,6 +373,8 @@ export default function App() {
 
   // Título de semana (solo debajo de la tabla de nóminas)
   const [sectionTitle, setSectionTitle] = useState<string>("");
+  const [showTopTotales, setShowTopTotales] = useState(false);
+  const [showNominasTable, setShowNominasTable] = useState(false);
 
   // Datos nómina
   const [rawData, setRawData] = useState<Row[]>([]);
@@ -553,7 +555,7 @@ export default function App() {
     return new Set(datosPeriodo.map((r) => String(r[key] ?? ""))).size;
   }, [datosPeriodo, columns]);
 
-  // Top 15
+  // Top 5
   const topTotales = useMemo(() => {
     if (!nameCol || !amountCol) return [] as { name: string; total: number }[];
     const acc = new Map<string, number>();
@@ -572,96 +574,27 @@ export default function App() {
     () => (topTotales.length ? Math.max(...topTotales.map((t) => t.total)) : 0),
     [topTotales]
   );
+  const topPanelAvailable = Boolean(nameCol && amountCol && topTotales.length > 0);
+
+  useEffect(() => {
+    if (!topPanelAvailable) {
+      setShowTopTotales(false);
+    }
+  }, [topPanelAvailable]);
 
   // Columnas visibles
   const visibleCols = useMemo(() => columns.slice(0, 30), [columns]);
+  const tablaNominasDisponible = rawData.length > 0 && visibleCols.length > 0;
+
+  useEffect(() => {
+    if (!tablaNominasDisponible) {
+      setShowNominasTable(false);
+    }
+  }, [tablaNominasDisponible]);
 
   /* ───── Configuración de cálculo de nómina ───────────────────── */
   const extrasThreshold = 53;
   const extraMultiplier = 1.8;
-
-  const crearNominaDesdeResumen = useCallback(
-    (resumen: CloseCheckinWeekResponse, semanaOverride?: string): NominaPayload => {
-      const empleadosNomina: NominaEmpleado[] = (resumen.empleados ?? []).map((registro) => {
-        const nombre = registro.nombre?.trim() || "Sin nombre";
-        const horasTotales = safeNumber(registro.horasTotales);
-        const umbralPrimarias = extrasThreshold > 0 ? extrasThreshold : horasTotales;
-        const horasPrimarias = Math.min(horasTotales, umbralPrimarias);
-        const horasExtras = Math.max(0, horasTotales - umbralPrimarias);
-
-        const empleadoData = empleados.find(
-          (emp) => emp.nombre?.toLowerCase().trim() === nombre.toLowerCase()
-        );
-
-        let costoHoraPrimaria = safeNumber(empleadoData?.tarifa);
-        if (!costoHoraPrimaria && empleadoData?.tipoPago === "Semanal fijo") {
-          const divisor = umbralPrimarias || horasTotales || 1;
-          costoHoraPrimaria = safeNumber(empleadoData?.pagoSemanal) / divisor;
-        }
-        if (!costoHoraPrimaria) costoHoraPrimaria = 0;
-
-        const multiplicadorExtra =
-          safeNumber(empleadoData?.extraX) > 0
-            ? safeNumber(empleadoData?.extraX)
-            : extraMultiplier || 1.8;
-        const costoHoraExtra =
-          multiplicadorExtra > 0 ? costoHoraPrimaria * multiplicadorExtra : costoHoraPrimaria;
-
-        const pagoHorasPrimarias = horasPrimarias * costoHoraPrimaria;
-        const pagoHorasExtras = horasExtras * costoHoraExtra;
-        const pagoSemanalCalc = pagoHorasPrimarias + pagoHorasExtras;
-        const pagoSemanalBase = safeNumber(empleadoData?.pagoSemanal);
-        const descuentos = 0;
-        const pendienteDescuento = 0;
-        const bonoSemanal = 0;
-        const bonoMensual = 0;
-        const comision = 0;
-
-        const total = pagoSemanalCalc - descuentos;
-        const total2 = total + bonoSemanal;
-        const totalConBonoMensual = total2 + bonoMensual;
-        const totalFinal = totalConBonoMensual + comision;
-
-        return {
-          nombre,
-          total_horas: round2(horasTotales),
-          horas_primarias: round2(horasPrimarias),
-          horas_extras: round2(horasExtras),
-          pago_semanal_base: round2(pagoSemanalBase),
-          costo_hora_primaria: round2(costoHoraPrimaria),
-          total_horas_primarias: round2(horasPrimarias),
-          pago_horas_primarias: round2(pagoHorasPrimarias),
-          costo_hora_extra: round2(costoHoraExtra),
-          pago_horas_extras: round2(pagoHorasExtras),
-          pago_semanal_calc: round2(pagoSemanalCalc),
-          descuentos: round2(descuentos),
-          pendiente_descuento: round2(pendienteDescuento),
-          total: round2(total),
-          bono_semanal: round2(bonoSemanal),
-          total_2: round2(total2),
-          bono_mensual: round2(bonoMensual),
-          comision: round2(comision),
-          comisiones: round2(comision),
-          total_con_bono_mensual: round2(totalConBonoMensual),
-          total_con_comision: round2(totalFinal),
-          extra: null,
-          total_final: round2(totalFinal),
-        };
-      });
-
-      const totalGeneral = empleadosNomina.reduce(
-        (acc, emp) => acc + safeNumber(emp.total_final),
-        0
-      );
-
-      return {
-        semana: semanaOverride?.trim() || resumen.semana,
-        empleados: empleadosNomina,
-        totalGeneral: round2(totalGeneral),
-      };
-    },
-    [empleados]
-  );
 
   // Editor manual de nómina eliminado: se conserva lógica histórica para calcular desde check-ins.
 
@@ -835,6 +768,7 @@ export default function App() {
   type DayPair = { in: string; out: string };
   type DayKey = "LUN" | "MAR" | "MIE" | "JUE" | "VIE" | "SAB";
   type CheckRow = { nombre: string } & Record<DayKey, DayPair>;
+  type DaySaveStatus = "idle" | "saving" | "saved";
   const DAY_NAME_TO_KEY: Record<string, DayKey> = {
     Lunes: "LUN",
     Martes: "MAR",
@@ -870,8 +804,43 @@ export default function App() {
   const [historialError, setHistorialError] = useState<string | null>(null);
   const [historialLoaded, setHistorialLoaded] = useState(false);
   const normalizarNombre = useCallback((nombre: string) => nombre.trim().toLowerCase(), []);
+  const empleadoNombrePorId = useMemo(() => {
+    const map = new Map<string, string>();
+    empleados.forEach((emp) => {
+      if (!emp._id) return;
+      const nombre = (emp.nombre || "").trim();
+      if (nombre) map.set(emp._id, nombre);
+    });
+    return map;
+  }, [empleados]);
+
+  const prestamosPorNombre = useMemo(() => {
+    const map = new Map<string, Prestamo[]>();
+    const parseDate = (p: Prestamo) => {
+      const raw = p.fechaISO || (p as { createdAt?: string }).createdAt || "";
+      return raw ? Date.parse(raw) || 0 : 0;
+    };
+    prestamos.forEach((prestamo) => {
+      const nombre = empleadoNombrePorId.get(prestamo.empleadoId)?.trim();
+      if (!nombre) return;
+      const key = normalizarNombre(nombre);
+      if (!key) return;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(prestamo);
+    });
+    map.forEach((lista) => {
+      lista.sort((a, b) => parseDate(b) - parseDate(a));
+    });
+    return map;
+  }, [empleadoNombrePorId, normalizarNombre, prestamos]);
   const [manualBonos, setManualBonos] = useState<Record<string, ManualBonusFlags>>({});
   const [checkTemplateMode, setCheckTemplateMode] = useState<"nombreArriba" | null>(null);
+  const [daySaveState, setDaySaveState] = useState<Record<string, DaySaveStatus>>({});
+  const DAY_STATUS_LABEL: Record<DaySaveStatus, string> = {
+    idle: "Pendiente",
+    saving: "Guardando...",
+    saved: "Guardado",
+  };
   const toggleManualBono = useCallback(
     (nombre: string, tipo: keyof ManualBonusFlags) => {
       const key = normalizarNombre(nombre);
@@ -914,6 +883,31 @@ export default function App() {
       return { index, nombre, rowsPorDia };
     });
   }, [isNombreArribaTemplate, nombreArribaDias, checkData]);
+
+  useEffect(() => {
+    if (!diasActivos.length) {
+      setDaySaveState({});
+      return;
+    }
+    setDaySaveState((prev) => {
+      const next: Record<string, DaySaveStatus> = {};
+      diasActivos.forEach((dia) => {
+        next[dia] = prev[dia] ?? "idle";
+      });
+      return next;
+    });
+  }, [diasActivos]);
+
+  useEffect(() => {
+    if (!semanaCheckin.trim()) {
+      setDaySaveState({});
+    }
+  }, [semanaCheckin]);
+
+  const totalDiasActivos = diasActivos.length;
+  const savedDaysCount = diasActivos.filter((dia) => daySaveState[dia] === "saved").length;
+  const hasPendingDays = diasActivos.some((dia) => daySaveState[dia] !== "saved");
+  const canCloseWeek = totalDiasActivos > 0 && !hasPendingDays;
 
   const actualizarNombreArribaNombre = useCallback(
     (rowIndex: number, nombre: string) => {
@@ -1167,6 +1161,120 @@ export default function App() {
     return resultados;
   }, [diasActivos, checkData, semanaCheckin, historialCheckins, normalizarNombre]);
 
+  const bonosAplicables = useMemo(() => {
+    const map = new Map<string, { bonoSemanal: number; bonoMensual: number }>();
+
+    resumenBonosSemana.forEach((row) => {
+      const key = normalizarNombre(row.nombre);
+      if (!key) return;
+      const manual = manualBonos[key];
+      const aplicaSemanal = row.semanal || Boolean(manual?.semanal);
+      const aplicaMensual = row.mensual || Boolean(manual?.mensual);
+      map.set(key, {
+        bonoSemanal: aplicaSemanal ? BONUS_WEEKLY_AMOUNT : 0,
+        bonoMensual: aplicaMensual ? BONUS_MONTHLY_AMOUNT : 0,
+      });
+    });
+
+    Object.entries(manualBonos).forEach(([key, flags]) => {
+      if (map.has(key)) return;
+      const aplicaSemanal = Boolean(flags?.semanal);
+      const aplicaMensual = Boolean(flags?.mensual);
+      if (!aplicaSemanal && !aplicaMensual) return;
+      map.set(key, {
+        bonoSemanal: aplicaSemanal ? BONUS_WEEKLY_AMOUNT : 0,
+        bonoMensual: aplicaMensual ? BONUS_MONTHLY_AMOUNT : 0,
+      });
+    });
+
+    return map;
+  }, [BONUS_MONTHLY_AMOUNT, BONUS_WEEKLY_AMOUNT, manualBonos, normalizarNombre, resumenBonosSemana]);
+
+  const crearNominaDesdeResumen = useCallback(
+    (resumen: CloseCheckinWeekResponse, semanaOverride?: string): NominaPayload => {
+      const empleadosNomina: NominaEmpleado[] = (resumen.empleados ?? []).map((registro) => {
+        const nombre = registro.nombre?.trim() || "Sin nombre";
+        const claveNombre = normalizarNombre(nombre);
+        const bonos = claveNombre ? bonosAplicables.get(claveNombre) : undefined;
+        const horasTotales = safeNumber(registro.horasTotales);
+        const umbralPrimarias = extrasThreshold > 0 ? extrasThreshold : horasTotales;
+        const horasPrimarias = Math.min(horasTotales, umbralPrimarias);
+        const horasExtras = Math.max(0, horasTotales - umbralPrimarias);
+
+        const empleadoData = empleados.find(
+          (emp) => emp.nombre?.toLowerCase().trim() === nombre.toLowerCase()
+        );
+
+        let costoHoraPrimaria = safeNumber(empleadoData?.tarifa);
+        if (!costoHoraPrimaria && empleadoData?.tipoPago === "Semanal fijo") {
+          const divisor = umbralPrimarias || horasTotales || 1;
+          costoHoraPrimaria = safeNumber(empleadoData?.pagoSemanal) / divisor;
+        }
+        if (!costoHoraPrimaria) costoHoraPrimaria = 0;
+
+        const multiplicadorExtra =
+          safeNumber(empleadoData?.extraX) > 0
+            ? safeNumber(empleadoData?.extraX)
+            : extraMultiplier || 1.8;
+        const costoHoraExtra =
+          multiplicadorExtra > 0 ? costoHoraPrimaria * multiplicadorExtra : costoHoraPrimaria;
+
+        const pagoHorasPrimarias = horasPrimarias * costoHoraPrimaria;
+        const pagoHorasExtras = horasExtras * costoHoraExtra;
+        const pagoSemanalCalc = pagoHorasPrimarias + pagoHorasExtras;
+        const pagoSemanalBase = safeNumber(empleadoData?.pagoSemanal);
+        const descuentos = 0;
+        const pendienteDescuento = 0;
+        const bonoSemanal = safeNumber(bonos?.bonoSemanal);
+        const bonoMensual = safeNumber(bonos?.bonoMensual);
+        const comision = 0;
+
+        const total = pagoSemanalCalc - descuentos;
+        const total2 = total + bonoSemanal;
+        const totalConBonoMensual = total2 + bonoMensual;
+        const totalFinal = totalConBonoMensual + comision;
+
+        return {
+          nombre,
+          total_horas: round2(horasTotales),
+          horas_primarias: round2(horasPrimarias),
+          horas_extras: round2(horasExtras),
+          pago_semanal_base: round2(pagoSemanalBase),
+          costo_hora_primaria: round2(costoHoraPrimaria),
+          total_horas_primarias: round2(horasPrimarias),
+          pago_horas_primarias: round2(pagoHorasPrimarias),
+          costo_hora_extra: round2(costoHoraExtra),
+          pago_horas_extras: round2(pagoHorasExtras),
+          pago_semanal_calc: round2(pagoSemanalCalc),
+          descuentos: round2(descuentos),
+          pendiente_descuento: round2(pendienteDescuento),
+          total: round2(total),
+          bono_semanal: round2(bonoSemanal),
+          total_2: round2(total2),
+          bono_mensual: round2(bonoMensual),
+          comision: round2(comision),
+          comisiones: round2(comision),
+          total_con_bono_mensual: round2(totalConBonoMensual),
+          total_con_comision: round2(totalFinal),
+          extra: null,
+          total_final: round2(totalFinal),
+        };
+      });
+
+      const totalGeneral = empleadosNomina.reduce(
+        (acc, emp) => acc + safeNumber(emp.total_final),
+        0
+      );
+
+      return {
+        semana: semanaOverride?.trim() || resumen.semana,
+        empleados: empleadosNomina,
+        totalGeneral: round2(totalGeneral),
+      };
+    },
+    [bonosAplicables, empleados, extraMultiplier, extrasThreshold, normalizarNombre]
+  );
+
   /* ───── Descuentos de nómina ─────────────────────────────────── */
   const [descuentoModalOpen, setDescuentoModalOpen] = useState(false);
   const [semanaObjetivo, setSemanaObjetivo] = useState<string>("");
@@ -1295,6 +1403,34 @@ export default function App() {
     if (!nominaObjetivoId) return null;
     return nominasSemanaSeleccionada.find((n) => n._id === nominaObjetivoId) ?? null;
   }, [nominasSemanaSeleccionada, nominaObjetivoId]);
+
+  const prestamosEmpleadoSeleccionado = useMemo(() => {
+    if (!registroNominaSeleccionado) return [];
+    const nombreClave = normalizarNombre(String(registroNominaSeleccionado.nombre ?? ""));
+    if (!nombreClave) return [];
+    return prestamosPorNombre.get(nombreClave) ?? [];
+  }, [normalizarNombre, prestamosPorNombre, registroNominaSeleccionado]);
+
+  const totalPrestamosEmpleado = useMemo(
+    () =>
+      round2(
+        prestamosEmpleadoSeleccionado.reduce(
+          (acc, prestamo) => acc + safeNumber(prestamo.monto),
+          0
+        )
+      ),
+    [prestamosEmpleadoSeleccionado]
+  );
+
+  const usarPrestamoEnFormulario = useCallback(
+    (monto: number) => {
+      const normalized = round2(safeNumber(monto));
+      if (!normalized || normalized <= 0) return;
+      setDescuentoValor(String(normalized));
+      setPendienteValor("0");
+    },
+    [setDescuentoValor, setPendienteValor]
+  );
 
   const descuentoPropuesto = Number(descuentoValor || 0);
   const pendientePropuesto = Number(pendienteValor || 0);
@@ -1538,11 +1674,12 @@ export default function App() {
     diasTemplate.forEach((dia) => {
       const dayKey = DAY_NAME_TO_KEY[dia];
       if (!dayKey) return;
-      const defaults = DAY_DEFAULTS[dayKey];
       template[dia] = Array.from({ length: rowsPerDay }, () => {
         const base = createEmptyCheckRow();
         base.nombre = "";
-        base[dayKey] = { in: defaults.in, out: defaults.out };
+        (Object.entries(DAY_DEFAULTS) as Array<[DayKey, DayPair]>).forEach(([key, defaults]) => {
+          base[key] = { ...defaults };
+        });
         return base;
       });
     });
@@ -1551,6 +1688,7 @@ export default function App() {
     setCheckData(template);
     if (select) select.value = "";
     setCheckTemplateMode("nombreArriba");
+    setDaySaveState({});
   }
 
   async function guardarCheckins(dia: string) {
@@ -1558,6 +1696,7 @@ export default function App() {
       const semana = semanaCheckin.trim();
       if (!semana) {
         alert("Define un título de semana antes de guardar.");
+        setDaySaveState((prev) => ({ ...prev, [dia]: "idle" }));
         return;
       }
       const dayKey = DAY_NAME_TO_KEY[dia] ?? "LUN";
@@ -1572,14 +1711,18 @@ export default function App() {
 
       if (!registros.length) {
         alert("⚠️ No hay registros para guardar.");
+        setDaySaveState((prev) => ({ ...prev, [dia]: "idle" }));
         return;
       }
 
+      setDaySaveState((prev) => ({ ...prev, [dia]: "saving" }));
       await createCheckins(registros);
       await cargarHistorial(true);
+      setDaySaveState((prev) => ({ ...prev, [dia]: "saved" }));
       alert(`✅ Check-ins del ${dia} guardados correctamente.`);
     } catch (err) {
       console.error("❌ Error al guardar check-ins:", err);
+      setDaySaveState((prev) => ({ ...prev, [dia]: "idle" }));
       alert("Error al guardar check-ins. Ver consola.");
     }
   }
@@ -1790,7 +1933,7 @@ export default function App() {
               <div className="rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/70 dark:bg-white/5 backdrop-blur">
                 <div className="flex flex-wrap gap-2 items-center">
                   <input
-                    className="px-3 py-2 min-w-[240px] rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-sm"
+                    className="px-3 py-2 flex-1 min-w-[280px] rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-sm"
                     placeholder='Semana (ej. "SEMANA #42 DEL 20 AL 26 OCT")'
                     value={semanaCheckin}
                     onChange={(e) => {
@@ -1802,7 +1945,7 @@ export default function App() {
                     }}
                   />
                   <input
-                    className="px-3 py-2 min-w-[240px] rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-sm"
+                    className="px-3 py-2 flex-1 min-w-[280px] rounded-xl bg-white/80 dark:bg-white/10 border border-petro-line/60 dark:border-white/10 text-sm"
                     placeholder="Semana para nómina (puedes editarla)"
                     value={semanaNomina}
                     onChange={(e) => {
@@ -2017,6 +2160,90 @@ export default function App() {
                           )}
                         </div>
                       )}
+                      {!!nombreArribaDias.length && (
+                        <div className="rounded-2xl border border-petro-line/60 dark:border-white/10 bg-white/90 dark:bg-white/5 p-3 space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <p className="text-sm font-semibold text-petro-redDark dark:text-white">
+                              Guarda día por día (semana típica)
+                            </p>
+                            <span className="text-xs font-semibold uppercase tracking-wide text-petro-ink/70 dark:text-white/70">
+                              {savedDaysCount}/{totalDiasActivos} guardados
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {nombreArribaDias.map((dia) => {
+                              const status = daySaveState[dia] ?? "idle";
+                              const chipClass =
+                                status === "saved"
+                                  ? "bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/20 dark:text-emerald-100 dark:border-emerald-500/40"
+                                  : status === "saving"
+                                  ? "bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-500/20 dark:text-amber-50 dark:border-amber-400/60"
+                                  : "bg-white text-petro-ink border border-petro-line/60 dark:bg-white/10 dark:text-white";
+                              return (
+                                <span key={`chip-template-${dia}`} className={`px-3 py-1 rounded-full text-[11px] font-semibold ${chipClass}`}>
+                                  {dia}: {DAY_STATUS_LABEL[status]}
+                                </span>
+                              );
+                            })}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {nombreArribaDias.map((dia) => {
+                              const status = daySaveState[dia] ?? "idle";
+                              const saving = status === "saving";
+                              return (
+                                <button
+                                  key={`template-save-${dia}`}
+                                  type="button"
+                                  onClick={() => guardarCheckins(dia)}
+                                  disabled={saving}
+                                  className="px-3 py-1.5 rounded-xl border border-petro-line/60 text-xs font-semibold bg-white/90 hover:bg-white disabled:opacity-60 disabled:cursor-not-allowed dark:bg-white/10 dark:text-white dark:border-white/15"
+                                >
+                                  {saving ? `Guardando ${dia}...` : status === "saved" ? `Actualizar ${dia}` : `Guardar ${dia}`}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {diasActivos.length > 0 && (
+                  <div className="px-4 pb-4">
+                    <div className="rounded-2xl border border-petro-line/60 dark:border-white/10 bg-white/80 dark:bg-white/5 p-4 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-petro-redDark dark:text-white">Paso 1 · Guarda cada día</p>
+                          <p className="text-xs opacity-70">Guarda la captura de cada día antes de cerrar la semana.</p>
+                        </div>
+                        <span className="text-xs font-semibold uppercase tracking-wide text-petro-ink/70 dark:text-white/70">
+                          {savedDaysCount}/{totalDiasActivos} guardados
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {diasActivos.map((dia) => {
+                          const status = daySaveState[dia] ?? "idle";
+                          const chipClass =
+                            status === "saved"
+                              ? "bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-100 dark:border-emerald-500/40"
+                              : status === "saving"
+                              ? "bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-100 dark:border-amber-500/40"
+                              : "bg-white text-petro-ink border border-petro-line/60 dark:bg-white/10 dark:text-white";
+                          return (
+                            <span key={`chip-${dia}`} className={`px-3 py-1 rounded-full text-xs font-semibold ${chipClass}`}>
+                              {dia}: {DAY_STATUS_LABEL[status]}
+                            </span>
+                          );
+                        })}
+                      </div>
+                      {isNombreArribaTemplate && (
+                        <p className="text-xs opacity-70">
+                          Estás usando la plantilla de semana típica. Guarda cada día desde la tarjeta superior del modo tabla.
+                        </p>
+                      )}
+                      <p className="text-xs opacity-70">
+                        Paso 2 · Cuando todos estén guardados, usa “Cerrar semana y generar nómina” para mandar los datos a Nóminas.
+                      </p>
                     </div>
                   </div>
                 )}
@@ -2029,6 +2256,7 @@ export default function App() {
                     diasActivos.map((dia) => {
                     const dayKey = DAY_NAME_TO_KEY[dia] ?? "LUN";
                     const normalizedDia = encodeURIComponent(dia.toLowerCase());
+                    const dayStatus = daySaveState[dia] ?? "idle";
                     return (
                       <div
                       key={dia}
@@ -2180,9 +2408,14 @@ export default function App() {
                         </button>
                         <button
                           onClick={() => guardarCheckins(dia)}
-                          className="ml-3 px-4 py-2 rounded-xl bg-green-600 text-white text-sm shadow hover:bg-green-700"
+                          disabled={dayStatus === "saving"}
+                          className="ml-3 px-4 py-2 rounded-xl bg-green-600 text-white text-sm shadow hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
                         >
-                          💾 Guardar {dia}
+                          {dayStatus === "saving"
+                            ? `Guardando ${dia}...`
+                            : dayStatus === "saved"
+                            ? `Actualizar ${dia}`
+                            : `💾 Guardar ${dia}`}
                         </button>
                       </div>
                     </div>
@@ -2190,7 +2423,8 @@ export default function App() {
                   })
                 ))}
                 <button
-                  className="mt-3 px-4 py-2 rounded-xl bg-green-600 text-white text-sm shadow hover:bg-green-700"
+                  className="mt-3 px-4 py-2 rounded-xl bg-green-600 text-white text-sm shadow hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                  disabled={!canCloseWeek}
                   onClick={async () => {
                     try {
                       const semana = semanaCheckin.trim();
@@ -2236,6 +2470,16 @@ export default function App() {
                 >
                   🧾 Cerrar semana y generar nómina
                 </button>
+                {!canCloseWeek && (
+                  <p className="mt-1 text-xs opacity-70">
+                    Guarda todos los días activos antes de cerrar la semana.
+                  </p>
+                )}
+                {canCloseWeek && (
+                  <p className="mt-1 text-xs opacity-70 text-emerald-700 dark:text-emerald-300">
+                    Listo. Puedes mandar la semana a Nóminas cuando lo necesites.
+                  </p>
+                )}
                 {resumenBonosSemana.length > 0 && (
                   <div className="mt-6 rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/80 dark:bg-white/5 backdrop-blur">
                     <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
@@ -2570,10 +2814,33 @@ export default function App() {
               {/* TABLA + TOP */}
               <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Tabla */}
-                <div className="lg:col-span-2">
+                <div className="order-2 lg:order-1 lg:col-span-2">
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                    <div>
+                      <h2 className="text-base font-semibold text-petro-redDark dark:text-white">
+                        Tabla completa de nóminas
+                      </h2>
+                      <p className="text-xs opacity-70">
+                        Incluye semana, nombre, bonos, comisiones, costos por hora y totales (fechas ocultas).
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-petro-line/60 bg-white/80 text-petro-ink hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed dark:bg-white/10 dark:text-white"
+                      onClick={() => setShowNominasTable((open) => !open)}
+                      disabled={!tablaNominasDisponible}
+                      aria-expanded={showNominasTable}
+                    >
+                      {showNominasTable ? "Ocultar tabla" : "Ver tabla completa"}
+                    </button>
+                  </div>
                   {rawData.length === 0 ? (
                     <p className="text-sm opacity-70">
                       Cargando datos… asegúrate de tener <code>public/nominas_merged_clean.json</code>
+                    </p>
+                  ) : !showNominasTable ? (
+                    <p className="text-sm opacity-70">
+                      Presiona "Ver tabla completa" para revisar la semana, nombre, bonos y totales antes de exportar.
                     </p>
                   ) : (
                     <>
@@ -2639,16 +2906,29 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Top 15 */}
-                <div className="rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/70 dark:bg-white/5 backdrop-blur">
-                  <h2 className="font-semibold mb-3">
-                    Top 5 por total ({amountCol || "monto"})
-                    {periodo ? ` · ${periodo}` : ""}
-                  </h2>
+                {/* Top 5 */}
+                <div className="order-1 lg:order-2 rounded-2xl p-4 shadow-xl ring-1 ring-petro-line/60 dark:ring-white/10 bg-white/70 dark:bg-white/5 backdrop-blur">
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <h2 className="font-semibold">
+                      Top 5 por total ({amountCol || "monto"})
+                      {periodo ? ` · ${periodo}` : ""}
+                    </h2>
+                    <button
+                      type="button"
+                      className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-petro-line/60 bg-white/80 text-petro-ink hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed dark:bg-white/10 dark:text-white"
+                      onClick={() => setShowTopTotales((open) => !open)}
+                      disabled={!topPanelAvailable}
+                      aria-expanded={showTopTotales}
+                    >
+                      {showTopTotales ? "Ocultar" : "Ver Top 5"}
+                    </button>
+                  </div>
                   {!nameCol || !amountCol ? (
                     <p className="text-sm opacity-70">Selecciona columnas de nombre y monto.</p>
                   ) : topTotales.length === 0 ? (
                     <p className="text-sm opacity-70">Sin datos.</p>
+                  ) : !showTopTotales ? (
+                    <p className="text-sm opacity-70">Presiona "Ver Top 5" para abrir el detalle.</p>
                   ) : (
                     <ul className="space-y-2">
                       {topTotales.map((t, idx) => {
@@ -3087,26 +3367,80 @@ export default function App() {
                         )}
 
                         {registroNominaSeleccionado ? (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-2xl border border-petro-line/40 dark:border-white/10 bg-white/60 dark:bg-white/5 px-4 py-3 text-sm">
-                            <div>
-                              <span className="font-medium block">Pago base registrado</span>
-                              <span className="font-mono text-lg">{fmt(pagoBaseNomina)}</span>
+                          <>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-2xl border border-petro-line/40 dark:border-white/10 bg-white/60 dark:bg-white/5 px-4 py-3 text-sm">
+                              <div>
+                                <span className="font-medium block">Pago base registrado</span>
+                                <span className="font-mono text-lg">{fmt(pagoBaseNomina)}</span>
+                              </div>
+                              <div>
+                                <span className="font-medium block">Descuento actual</span>
+                                <span className="font-mono">{fmt(descuentoAnterior)}</span>
+                              </div>
+                              <div>
+                                <span className="font-medium block">Pendiente actual</span>
+                                <span className="font-mono">{fmt(pendienteAnterior)}</span>
+                              </div>
+                              <div>
+                                <span className="font-medium block">Total estimado con descuento</span>
+                                <span className="font-mono text-lg text-petro-redDark dark:text-petro-redLight">
+                                  {fmt(nuevoTotalEstimado)}
+                                </span>
+                              </div>
                             </div>
-                            <div>
-                              <span className="font-medium block">Descuento actual</span>
-                              <span className="font-mono">{fmt(descuentoAnterior)}</span>
+                            <div className="rounded-2xl border border-dashed border-petro-line/60 dark:border-white/10 bg-white/80 dark:bg-white/5 px-4 py-3 text-sm">
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                  <p className="font-medium text-petro-redDark dark:text-petro-redLight">
+                                    Préstamos registrados en Equipo
+                                  </p>
+                                  <p className="text-xs opacity-70">
+                                    Usa alguno para rellenar el descuento automáticamente.
+                                  </p>
+                                </div>
+                                {prestamosEmpleadoSeleccionado.length > 0 && (
+                                  <span className="text-xs font-semibold uppercase tracking-wide text-petro-ink/70 dark:text-white/70">
+                                    Total: ${fmt(totalPrestamosEmpleado)}
+                                  </span>
+                                )}
+                              </div>
+                              {loadingPrestamos ? (
+                                <p className="mt-2 text-xs opacity-70">Cargando préstamos…</p>
+                              ) : prestamosEmpleadoSeleccionado.length === 0 ? (
+                                <p className="mt-2 text-xs opacity-70">
+                                  Este colaborador no tiene préstamos capturados en la sección Equipo.
+                                </p>
+                              ) : (
+                                <ul className="mt-3 space-y-2 max-h-44 overflow-auto pr-1">
+                                  {prestamosEmpleadoSeleccionado.map((p) => (
+                                    <li
+                                      key={p._id}
+                                      className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-petro-line/40 dark:border-white/10 bg-white/90 dark:bg-white/5 px-3 py-2"
+                                    >
+                                      <div>
+                                        <p className="font-semibold text-sm text-petro-redDark dark:text-white">
+                                          ${fmt(p.monto)}
+                                        </p>
+                                        <p className="text-xs opacity-70">
+                                          {(p.descripcion || "Sin descripción").slice(0, 120)}
+                                        </p>
+                                        <p className="text-[11px] opacity-60">
+                                          {p.fechaISO ? new Date(p.fechaISO).toLocaleDateString() : "Sin fecha"}
+                                        </p>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-petro-red to-petro-redDark text-white text-xs shadow hover:shadow-md"
+                                        onClick={() => usarPrestamoEnFormulario(p.monto)}
+                                      >
+                                        Usar monto
+                                      </button>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
                             </div>
-                            <div>
-                              <span className="font-medium block">Pendiente actual</span>
-                              <span className="font-mono">{fmt(pendienteAnterior)}</span>
-                            </div>
-                            <div>
-                              <span className="font-medium block">Total estimado con descuento</span>
-                              <span className="font-mono text-lg text-petro-redDark dark:text-petro-redLight">
-                                {fmt(nuevoTotalEstimado)}
-                              </span>
-                            </div>
-                          </div>
+                          </>
                         ) : (
                           <p className="text-sm opacity-70">
                             Selecciona un empleado para revisar el detalle de la nómina guardada.
