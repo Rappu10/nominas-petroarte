@@ -24,39 +24,25 @@ router.post("/", async (req, res) => {
   try {
     const { empleados, semana } = req.body;
 
-    // Si viene un arreglo de empleados, los guardamos individualmente
-    if (Array.isArray(empleados)) {
+    // Si viene un arreglo de empleados, los guardamos sin sobrescribir
+    if (Array.isArray(empleados) && empleados.length > 0) {
       const now = new Date();
-      const result = await Promise.all(
-        empleados.map(async (emp: NominaPayload) => {
-          const filtro: Record<string, unknown> = {
-            nombre: emp.nombre,
-          };
-          if (semana) filtro.semana = semana;
-          return Nomina.findOneAndUpdate(
-            filtro,
-            {
-              ...emp,
-              semana,
-              fechaRegistro: now,
-            },
-            { new: true, upsert: true, setDefaultsOnInsert: true }
-          );
-        })
-      );
+      const docs = empleados.map((emp: NominaPayload) => ({
+        ...emp,
+        semana: semana?.trim() || emp.semana?.trim() || "",
+        fechaRegistro: now,
+      }));
+      const result = await Nomina.insertMany(docs);
       return res.json(result);
     }
 
-    // Si es un solo registro, también lo sobreescribimos
-    const filtroUnico: Record<string, unknown> = {
-      nombre: req.body?.nombre,
+    // Si es un solo registro, lo guardamos tal cual
+    const payload: NominaPayload = {
+      ...req.body,
+      semana: semana?.trim() || req.body?.semana?.trim() || "",
+      fechaRegistro: new Date(),
     };
-    if (req.body?.semana) filtroUnico.semana = req.body.semana;
-    const saved = await Nomina.findOneAndUpdate(
-      filtroUnico,
-      { ...req.body, fechaRegistro: new Date() },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
-    );
+    const saved = await Nomina.create(payload);
     res.json(saved);
   } catch (err) {
     console.error("❌ Error al guardar nómina:", err);
