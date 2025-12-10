@@ -1760,7 +1760,7 @@ export default function App() {
     const select = document.getElementById("nuevo-dia") as HTMLSelectElement | null;
     const diasTemplate = [...TEMPLATE_DAYS];
     const template: Record<string, CheckRow[]> = {};
-    const rowsPerDay = 12;
+    const rowsPerDay = 16;
 
     diasTemplate.forEach((dia) => {
       const dayKey = DAY_NAME_TO_KEY[dia];
