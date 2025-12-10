@@ -813,9 +813,16 @@ export default function App() {
     }
     try {
       setGuardandoDescuento(true);
+      const baseSinDescuento = round2(pagoBaseNomina + descuentoAnterior);
+      const totalFinalActualizado = Math.max(
+        0,
+        round2(baseSinDescuento - descuentoPropuesto)
+      );
       await updateNomina(nominaObjetivoId, {
         descuentos: round2(descuentoPropuesto),
         pendiente_descuento: round2(pendientePropuesto),
+        total: totalFinalActualizado,
+        total_final: totalFinalActualizado,
       });
       await refrescarNominas();
       showAlert("✅ Descuento actualizado", "success");

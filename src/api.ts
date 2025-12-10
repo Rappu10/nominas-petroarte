@@ -237,6 +237,8 @@ export async function createNomina(payload: NominaPayload): Promise<Nomina> {
 type NominaUpdatePayload = {
   descuentos?: number;
   pendiente_descuento?: number;
+  total?: number;
+  total_final?: number;
 };
 
 export async function updateNomina(id: string, data: NominaUpdatePayload): Promise<Nomina> {
