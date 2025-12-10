@@ -28,7 +28,7 @@ import type {
   CloseCheckinWeekResponse,
 } from "./api";
 
-type Row = Record<string, any>;
+type Row = Record<string, unknown>;
 type Section = "nominas" | "empleados" | "checkin" | "billetes";
 type NominaRegistro = NominaEmpleado & {
   _id?: string;
@@ -242,6 +242,55 @@ const SECTION_GUIDES: Record<Section, SectionGuideInfo> = {
   },
 };
 
+type DayPair = { in: string; out: string };
+type DayKey = "LUN" | "MAR" | "MIE" | "JUE" | "VIE" | "SAB";
+type CheckRow = { nombre: string } & Record<DayKey, DayPair>;
+type DaySaveStatus = "idle" | "saving" | "saved";
+const DAY_NAME_TO_KEY: Record<string, DayKey> = {
+  Lunes: "LUN",
+  Martes: "MAR",
+  Miércoles: "MIE",
+  Jueves: "JUE",
+  Viernes: "VIE",
+  Sábado: "SAB",
+};
+const TEMPLATE_DAYS: readonly string[] = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+const DAY_DEFAULTS: Record<DayKey, DayPair> = {
+  LUN: { in: "08:30", out: "18:00" },
+  MAR: { in: "08:30", out: "18:00" },
+  MIE: { in: "08:30", out: "18:00" },
+  JUE: { in: "08:30", out: "18:00" },
+  VIE: { in: "08:30", out: "18:00" },
+  SAB: { in: "08:30", out: "14:00" },
+};
+const DAY_STATUS_LABEL: Record<DaySaveStatus, string> = {
+  idle: "Pendiente",
+  saving: "Guardando...",
+  saved: "Guardado",
+};
+
+function createEmptyCheckRow(): CheckRow {
+  return {
+    nombre: "",
+    LUN: { in: "", out: "" },
+    MAR: { in: "", out: "" },
+    MIE: { in: "", out: "" },
+    JUE: { in: "", out: "" },
+    VIE: { in: "", out: "" },
+    SAB: { in: "", out: "" },
+  };
+}
+
+type Den = 1000 | 500 | 200 | 100 | 50;
+type BilletesEntry = {
+  id: string;
+  fechaISO: string;
+  nota: string;
+  desglose: Record<Den, number>;
+  total: number;
+};
+const DENOMS: Den[] = [1000, 500, 200, 100, 50];
+
 /* ───── Utilidades ─────────────────────────────────────────────── */
 function toCSV(rows: Row[]): string {
   if (!rows?.length) return "";
@@ -332,22 +381,14 @@ function agruparNominasPorSemana(registros: NominaRegistro[]): NominaSemana[] {
 
   registros.forEach((registro) => {
     const semana = registro.semana?.trim() || "Sin semana";
-    const {
-      _id: _omitId,
-      createdAt,
-      updatedAt,
-      fechaRegistro,
-      totalGeneral: totalGeneralRegistro,
-      empleados: _empleadosNested,
-      ...resto
-    } = registro;
-
-    const empleado = resto as NominaEmpleado;
+    const totalGeneralRegistro = registro.totalGeneral;
+    const empleado = registro as NominaEmpleado;
     const totalEmpleado = pickNumber(
       (empleado as Partial<NominaEmpleado>).total_final,
       (empleado as Partial<NominaEmpleado>).total,
       totalGeneralRegistro
     );
+    const createdAtValue = registro.createdAt ?? registro.updatedAt ?? registro.fechaRegistro;
 
     const existente = map.get(semana);
     if (existente) {
@@ -355,20 +396,20 @@ function agruparNominasPorSemana(registros: NominaRegistro[]): NominaSemana[] {
       existente.totalGeneral += totalEmpleado;
 
       const existenteTime = getTime(existente.createdAt);
-      const createdTime = getTime(createdAt);
+      const createdTime = getTime(createdAtValue);
       if (createdTime > existenteTime) {
-        existente.createdAt = createdAt;
+        existente.createdAt = createdAtValue;
       }
-      if (!existente.fechaRegistro && fechaRegistro) {
-        existente.fechaRegistro = fechaRegistro;
+      if (!existente.fechaRegistro && registro.fechaRegistro) {
+        existente.fechaRegistro = registro.fechaRegistro;
       }
     } else {
       map.set(semana, {
         semana,
         empleados: [empleado],
         totalGeneral: totalEmpleado,
-        createdAt: createdAt ?? updatedAt ?? fechaRegistro,
-        fechaRegistro,
+        createdAt: createdAtValue,
+        fechaRegistro: registro.fechaRegistro,
       });
     }
   });
@@ -719,8 +760,9 @@ export default function App() {
         rfc: extraForm.rfc.trim().toUpperCase(),
         curp: extraForm.curp.trim().toUpperCase(),
       };
-      const { _id, ...rest } = { ...extraEmpleado, ...clean };
-      const actualizado = await updateEmpleado(extraEmpleado._id, rest);
+      const payload: Partial<Employee> = { ...extraEmpleado, ...clean };
+      delete payload._id;
+      const actualizado = await updateEmpleado(extraEmpleado._id, payload);
       setEmpleados((prev) => prev.map((e) => (e._id === actualizado._id ? actualizado : e)));
       setExtraEmpleado(null);
     } catch (err) {
@@ -825,38 +867,6 @@ export default function App() {
   }
 
   /* ───── Check-in ─────────────────────────────────────────────── */
-  type DayPair = { in: string; out: string };
-  type DayKey = "LUN" | "MAR" | "MIE" | "JUE" | "VIE" | "SAB";
-  type CheckRow = { nombre: string } & Record<DayKey, DayPair>;
-  type DaySaveStatus = "idle" | "saving" | "saved";
-  const DAY_NAME_TO_KEY: Record<string, DayKey> = {
-    Lunes: "LUN",
-    Martes: "MAR",
-    Miércoles: "MIE",
-    Jueves: "JUE",
-    Viernes: "VIE",
-    Sábado: "SAB",
-  };
-  const TEMPLATE_DAYS: readonly string[] = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
-  const DAY_DEFAULTS: Record<DayKey, DayPair> = {
-    LUN: { in: "08:30", out: "18:00" },
-    MAR: { in: "08:30", out: "18:00" },
-    MIE: { in: "08:30", out: "18:00" },
-    JUE: { in: "08:30", out: "18:00" },
-    VIE: { in: "08:30", out: "18:00" },
-    SAB: { in: "08:30", out: "14:00" },
-  };
-
-  const createEmptyCheckRow = (): CheckRow => ({
-    nombre: "",
-    LUN: { in: "", out: "" },
-    MAR: { in: "", out: "" },
-    MIE: { in: "", out: "" },
-    JUE: { in: "", out: "" },
-    VIE: { in: "", out: "" },
-    SAB: { in: "", out: "" },
-  });
-
   const [diasActivos, setDiasActivos] = useState<string[]>([]);
   const [checkData, setCheckData] = useState<Record<string, CheckRow[]>>({});
   const [historialCheckins, setHistorialCheckins] = useState<Checkin[]>([]);
@@ -908,11 +918,6 @@ export default function App() {
   const [manualBonos, setManualBonos] = useState<Record<string, ManualBonusFlags>>({});
   const [checkTemplateMode, setCheckTemplateMode] = useState<"nombreArriba" | null>(null);
   const [daySaveState, setDaySaveState] = useState<Record<string, DaySaveStatus>>({});
-  const DAY_STATUS_LABEL: Record<DaySaveStatus, string> = {
-    idle: "Pendiente",
-    saving: "Guardando...",
-    saved: "Guardado",
-  };
   const toggleManualBono = useCallback(
     (nombre: string, tipo: keyof ManualBonusFlags) => {
       const key = normalizarNombre(nombre);
@@ -1807,28 +1812,22 @@ export default function App() {
   }
 
   /* ───── Billetes (estado + persistencia) ─────────────────────── */
-  type Den = 1000 | 500 | 200 | 100 | 50;
-  type BilletesEntry = {
-    id: string;
-    fechaISO: string;     // registro
-    nota: string;
-    desglose: Record<Den, number>; // conteo por denominación
-    total: number;
-  };
-
-  const DENOMS: Den[] = [1000, 500, 200, 100, 50];
 
   const [billetes, setBilletes] = useState<BilletesEntry[]>(() => {
     try {
       const saved = localStorage.getItem("billetes_v1");
       if (saved) return JSON.parse(saved);
-    } catch {}
+    } catch (error) {
+      console.warn("No se pudo leer el historial de billetes:", error);
+    }
     return [];
   });
   useEffect(() => {
     try {
       localStorage.setItem("billetes_v1", JSON.stringify(billetes));
-    } catch {}
+    } catch (error) {
+      console.warn("No se pudo persistir el historial de billetes:", error);
+    }
   }, [billetes]);
 
   // Estado del formulario de billetes

@@ -164,12 +164,13 @@ export async function createEmpleado(payload: EmployeePayload): Promise<Employee
 }
 
 export async function updateEmpleado(id: string, data: Partial<Employee>): Promise<Employee> {
-  const { _id, ...rest } = data;
+  const payload = { ...data };
+  delete payload._id;
   return handleJSON<Employee>(
     fetch(`${API_BASE}/empleados/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(rest),
+      body: JSON.stringify(payload),
       credentials: "include",
     })
   );

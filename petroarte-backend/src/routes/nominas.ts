@@ -1,7 +1,12 @@
 import { Router } from "express";
-import Nomina from "../models/Nomina";
+import Nomina, { INomina } from "../models/Nomina";
 
 const router = Router();
+
+type NominaPayload = Partial<Omit<INomina, "_id">> & {
+  nombre?: string;
+  semana?: string;
+};
 
 // Obtener todas las nóminas
 router.get("/", async (req, res) => {
@@ -23,7 +28,7 @@ router.post("/", async (req, res) => {
     if (Array.isArray(empleados)) {
       const now = new Date();
       const result = await Promise.all(
-        empleados.map(async (emp: any) => {
+        empleados.map(async (emp: NominaPayload) => {
           const filtro: Record<string, unknown> = {
             nombre: emp.nombre,
           };
@@ -116,6 +121,7 @@ router.delete("/all", async (_req, res) => {
     await Nomina.deleteMany({});
     res.json({ message: "Todas las nóminas eliminadas" });
   } catch (err) {
+    console.error("❌ Error al eliminar todas las nóminas:", err);
     res.status(500).json({ error: "Error al eliminar nóminas" });
   }
 });
